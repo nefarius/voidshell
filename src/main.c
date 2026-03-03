@@ -25,6 +25,7 @@
 #include "install.h"
 #include "sentinel.h"
 #include "webserver.h"
+#include "image_mount.h"
 #include "ps5_sdk.h"
 
 #include <stdio.h>
@@ -230,6 +231,25 @@ void *thread_autorun_payloads(void *arg)
     return NULL;
 }
 
+/* ---- thread_image_scan_loop ---- */
+/*
+ * Dedicated thread that periodically scans configured paths for image files
+ * (.exfat, .ffpkg, .ffpfs) and mounts them via the image_mount engine.
+ * Interval is driven by g_img_scan_interval (from [ImageMount] config).
+ */
+static void *thread_image_scan_loop(void *arg)
+{
+    (void)arg;
+    image_mount_init();
+    while (g_running) {
+        if (!g_paused)
+            image_mount_scan();
+        for (int i = 0; i < g_img_scan_interval && g_running; i++)
+            sleep(1);
+    }
+    return NULL;
+}
+
 /* ---- main  (0x103180) ---- */
 /*
  * VoidShell daemon entry point.
@@ -304,6 +324,13 @@ int main(void)
 
     /* --- 7. Initialize mutexes --- */
     init_mutexes();
+
+    /* --- 7b. Spawn image scanner thread --- */
+    {
+        pthread_t tid_img;
+        pthread_create(&tid_img, NULL, thread_image_scan_loop, NULL);
+        pthread_detach(tid_img);
+    }
 
     /* --- 8. Auto-detect local IP via UDP connect trick --- */
     detect_local_ip();
@@ -411,5 +438,6 @@ int main(void)
         sceKernelUsleep(sleep_us);
     }
 
+    image_mount_shutdown();
     return 0;
 }

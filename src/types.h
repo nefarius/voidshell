@@ -197,4 +197,39 @@ extern char cache[512 * 0x421];
  * ---------------------------------------------------------- */
 extern void *f_sceNotificationSend;
 
+/* ---- Image mount types (ported from ShadowMountPlus) ---- */
+#define MAX_IMAGE_MOUNTS   64
+#define IMAGE_MOUNT_BASE   "/data/imgmnt"
+
+typedef enum {
+    IMAGE_FS_UNKNOWN = 0,
+    IMAGE_FS_EXFAT,
+    IMAGE_FS_UFS,       /* .ffpkg */
+    IMAGE_FS_PFS,       /* .ffpfs */
+} image_fs_type_e;
+
+typedef enum {
+    ATTACH_BACKEND_NONE = 0,
+    ATTACH_BACKEND_LVD,
+    ATTACH_BACKEND_MD,
+} attach_backend_e;
+
+typedef struct {
+    char             path[1024];        /* absolute source image path   */
+    char             mount_point[1024]; /* mount directory              */
+    int              unit_id;           /* lvdN / mdN unit number       */
+    attach_backend_e backend;
+    bool             valid;
+} image_mount_entry_t;
+
+extern image_mount_entry_t image_cache[MAX_IMAGE_MOUNTS];
+
+/* Image mount config (set by config.c, read by image_mount.c) */
+extern bool g_img_mount_ro;          /* [ImageMount] ReadOnly      */
+extern int  g_img_scan_interval;     /* [ImageMount] ScanInterval  */
+extern int  g_img_stability_wait;    /* [ImageMount] StabilityWait */
+extern char g_img_backend[8];        /* [ImageMount] Backend "lvd"/"md" */
+extern int  g_img_scan_paths_count;
+extern char g_img_scan_paths[16][1024]; /* [ImageMount] ScanPath= lines */
+
 #endif /* TYPES_H */

@@ -20,6 +20,8 @@
  *   POST /api/repair       -> trigger_repair()
  *   POST /api/save_ini     -> overwrite config.ini + reload
  *   POST /api/cache/save   -> save a PNG to /data/voidshell/cache/
+ *   GET  /api/images       -> JSON: currently mounted images (image_cache)
+ *   POST /api/images/unmount -> unmount image by source path (body = path)
  *
  * PKG server (port 12576):
  *   POST /upload               -> upload PKG file, start install
@@ -39,6 +41,7 @@
 #include "install.h"
 #include "sentinel.h"
 #include "config.h"
+#include "image_mount.h"
 #include "ps5_sdk.h"
 
 #include <stdio.h>
@@ -1138,6 +1141,31 @@ void handle_client(int sock)
             notify_system("%s", msg);
         }
         send_response(sock, "application/json", "{\"status\":\"ok\"}", 15, 1);
+        goto done;
+    }
+
+    /* ---- API: images list ---- */
+    if (strncmp(request, "GET /api/images ", 16) == 0) {
+        static char img_json[MAX_IMAGE_MOUNTS * 256 + 8];
+        int len = image_mount_list_json(img_json, sizeof(img_json));
+        send_response(sock, "application/json", img_json, (size_t)len, 1);
+        goto done;
+    }
+
+    /* ---- API: images unmount ---- */
+    if (strncmp(request, "POST /api/images/unmount", 24) == 0) {
+        char target[1024] = {0};
+        char *body = strstr(request, "\r\n\r\n");
+        if (body) {
+            body += 4;
+            int n = 0;
+            while (n < 1023 && body[n] && body[n] != '\r' && body[n] != '\n') {
+                target[n] = body[n]; n++;
+            }
+        }
+        bool ok = (target[0] != '\0') && image_mount_unmount_by_path(target);
+        const char *resp = ok ? "{\"status\":\"ok\"}" : "{\"status\":\"error\"}";
+        send_response(sock, "application/json", resp, strlen(resp), 1);
         goto done;
     }
 

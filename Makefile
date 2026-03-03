@@ -21,16 +21,17 @@ LIBS := \
 
 # Sources
 SRCS := \
-    main.c      \
-    globals.c   \
-    logging.c   \
-    utils.c     \
-    config.c    \
-    fan.c       \
-    kernel.c    \
-    install.c   \
-    sentinel.c  \
-    webserver.c \
+    main.c        \
+    globals.c     \
+    logging.c     \
+    utils.c       \
+    config.c      \
+    fan.c         \
+    kernel.c      \
+    install.c     \
+    sentinel.c    \
+    webserver.c   \
+    image_mount.c \
     sqlite3.c
 
 OBJS := $(addprefix $(BUILDDIR)/,$(SRCS:.c=.o))

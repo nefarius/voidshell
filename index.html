@@ -532,7 +532,7 @@
 
         const Navigation = ({ tab, setTab, onAction, version }) => {
             const [showMore, setShowMore] = useState(false); const { isDark, toggle } = useContext(ThemeContext);
-            const tabs = [ { id: 'dashboard', icon: 'layout-dashboard', label: 'Home' }, { id: 'pkg', icon: 'package', label: 'PKG' }, { id: 'payloads', icon: 'cpu', label: 'Payloads' }, { id: 'settings', icon: 'settings', label: 'Settings' } ];
+            const tabs = [ { id: 'dashboard', icon: 'layout-dashboard', label: 'Home' }, { id: 'pkg', icon: 'package', label: 'PKG' }, { id: 'payloads', icon: 'cpu', label: 'Payloads' }, { id: 'images', icon: 'hard-drive', label: 'Images' }, { id: 'settings', icon: 'settings', label: 'Settings' } ];
             const handleTab = (id) => { haptic(); setTab(id); setShowMore(false); };
             const handleMore = () => { haptic(); setShowMore(!showMore); };
 
@@ -758,6 +758,104 @@
             );
         };
 
+        const Images = ({ showToast }) => {
+            const [images, setImages] = useState([]);
+            useEffect(() => { if (window.lucide) window.lucide.createIcons(); }, [images]);
+
+            const fetchImages = () => {
+                fetch(`${API_BASE}/api/images`)
+                    .then(r => r.json())
+                    .then(data => setImages(Array.isArray(data) ? data : []))
+                    .catch(() => {});
+            };
+
+            useEffect(() => {
+                fetchImages();
+                const id = setInterval(fetchImages, 5000);
+                return () => clearInterval(id);
+            }, []);
+
+            const unmount = (path) => {
+                haptic();
+                fetch(`${API_BASE}/api/images/unmount`, { method: 'POST', body: path })
+                    .then(r => r.json())
+                    .then(d => {
+                        if (d.status === 'ok') {
+                            showToast("Image unmounted");
+                            fetchImages();
+                        } else {
+                            showToast("Unmount failed");
+                        }
+                    })
+                    .catch(() => showToast("Unmount error"));
+            };
+
+            return (
+                <div className="space-y-6 pb-24 animate-in fade-in slide-in-from-bottom-4">
+                    <div className="flex justify-between items-center">
+                        <h2 className="text-2xl font-bold flex items-center gap-2 text-gray-900 dark:text-white">
+                            <i data-lucide="hard-drive" className="text-neon-blue"></i> Mounted Images
+                        </h2>
+                        <button onClick={fetchImages} className="bg-neon-blue/10 text-neon-blue hover:bg-neon-blue/20 px-4 py-2 rounded-xl font-bold text-xs border border-neon-blue/20 transition-colors">
+                            Refresh
+                        </button>
+                    </div>
+
+                    {images.length === 0 ? (
+                        <div className="text-center text-gray-500 py-16">
+                            <i data-lucide="hard-drive" className="w-12 h-12 mx-auto mb-4 text-gray-300 dark:text-gray-600"></i>
+                            <p className="font-medium">No images mounted</p>
+                            <p className="text-xs mt-1 text-gray-400">Place .exfat / .ffpkg / .ffpfs files in a configured ScanPath</p>
+                        </div>
+                    ) : (
+                        <div className="glass rounded-2xl overflow-hidden">
+                            <table className="w-full text-sm">
+                                <thead>
+                                    <tr className="border-b border-black/5 dark:border-white/10">
+                                        <th className="text-left p-4 text-xs font-bold uppercase tracking-wider text-gray-500">Path</th>
+                                        <th className="text-left p-4 text-xs font-bold uppercase tracking-wider text-gray-500 hidden md:table-cell">Mount Point</th>
+                                        <th className="text-left p-4 text-xs font-bold uppercase tracking-wider text-gray-500">Backend</th>
+                                        <th className="p-4"></th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {images.map((img, i) => (
+                                        <tr key={img.path} className={`border-b border-black/5 dark:border-white/5 last:border-0 ${i % 2 === 0 ? '' : 'bg-black/[0.02] dark:bg-white/[0.02]'}`}>
+                                            <td className="p-4">
+                                                <div className="flex items-center gap-3">
+                                                    <div className="bg-neon-blue/10 p-2 rounded-lg flex-shrink-0">
+                                                        <i data-lucide="disc" className="w-4 h-4 text-neon-blue"></i>
+                                                    </div>
+                                                    <span className="font-mono text-xs text-gray-700 dark:text-gray-300 truncate max-w-[180px]" title={img.path}>
+                                                        {img.path.split('/').pop()}
+                                                    </span>
+                                                </div>
+                                            </td>
+                                            <td className="p-4 hidden md:table-cell">
+                                                <span className="font-mono text-xs text-gray-500 truncate max-w-[200px] block" title={img.mount_point}>
+                                                    {img.mount_point}
+                                                </span>
+                                            </td>
+                                            <td className="p-4">
+                                                <span className={`text-xs font-bold px-2 py-1 rounded-full ${img.backend === 'lvd' ? 'bg-neon-purple/10 text-neon-purple' : 'bg-neon-green/10 text-neon-green'}`}>
+                                                    {img.backend.toUpperCase()}
+                                                </span>
+                                            </td>
+                                            <td className="p-4 text-right">
+                                                <button onClick={() => unmount(img.path)} className="bg-red-500/10 text-red-500 hover:bg-red-500/20 px-3 py-1.5 rounded-lg font-bold text-xs flex gap-1.5 items-center ml-auto transition-colors border border-red-500/20">
+                                                    <i data-lucide="eject" className="w-3 h-3"></i> Unmount
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
         const App = () => {
             const [tab, setTab] = useState('dashboard');
             const [stats, setStats] = useState({ cpu: 0, soc: 0, active_game: '', fan_active: false, total: 0, ps5: 0, ps4: 0, session_count: 0, version: APP_VERSION });
@@ -869,6 +967,7 @@
                         )}
                         {tab === 'pkg' && <PKGManager showToast={showToast} uploading={uploading} uploadStats={uploadStats} processUpload={processUpload} />}
                         {tab === 'payloads' && <Payloads showToast={showToast} />}
+                        {tab === 'images' && <Images showToast={showToast} />}
                         {tab === 'settings' && <Settings showToast={showToast} library={library} />}
                         {tab === 'logs' && <Terminal showToast={showToast} />}
                     </main>

@@ -86,6 +86,15 @@ int sceSystemServiceGetAppIdOfRunningBigApp(void)
     return -1;
 }
 
+/* ---- image_mount globals ---- */
+image_mount_entry_t image_cache[MAX_IMAGE_MOUNTS];
+bool g_img_mount_ro        = true;
+int  g_img_scan_interval   = 30;
+int  g_img_stability_wait  = 5;
+char g_img_backend[8]      = "lvd";
+int  g_img_scan_paths_count = 0;
+char g_img_scan_paths[16][1024];
+
 __attribute__((weak))
 int sceSystemServiceGetAppTitleId(int app_id, char *title_id_out, size_t size)
 {

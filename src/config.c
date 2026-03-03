@@ -16,6 +16,7 @@
  *   5 = [SentinelGames]
  *   6 = [AutoPayloads]
  *   7 = [FanControl]
+ *   8 = [ImageMount]
  */
 
 #include "config.h"
@@ -103,7 +104,15 @@ static const char DEFAULT_CONFIG[] =
     "\n"
     "[CustomPaths]\n"
     "\n"
-    "[Blacklist]\n";
+    "[Blacklist]\n"
+    "\n"
+    "# IMAGE MOUNT\n"
+    "[ImageMount]\n"
+    "ReadOnly=1\n"
+    "ScanInterval=30\n"
+    "StabilityWait=5\n"
+    "Backend=lvd\n"
+    "# ScanPath=/mnt/usb0\n";
 
 /* ============================================================
  * create_default_config  (addr 0x100930)
@@ -188,6 +197,7 @@ void load_config(void)
             if (strncasecmp(p, "[SentinelGames]",  15) == 0) { section = 5; continue; }
             if (strncasecmp(p, "[AutoPayloads]",   14) == 0) { section = 6; continue; }
             if (strncasecmp(p, "[FanControl]",     12) == 0) { section = 7; continue; }
+            if (strncasecmp(p, "[ImageMount]",     12) == 0) { section = 8; continue; }
             /* Unknown section — stay in current section */
             continue;
         }
@@ -289,6 +299,25 @@ void load_config(void)
                 g_fan_enabled = (strcasecmp(val, "true") == 0);
             else if (strcasecmp(p, "TargetTemp") == 0)
                 g_fan_target_temp = atoi(val);
+            break;
+
+        case 8: /* [ImageMount] */
+            eq = strchr(p, '=');
+            if (!eq) break;
+            *eq = '\0';
+            val = eq + 1;
+            while (isspace((unsigned char)*val)) val++;
+
+            if (strcasecmp(p, "ReadOnly") == 0)
+                g_img_mount_ro = (atoi(val) != 0);
+            else if (strcasecmp(p, "ScanInterval") == 0)
+                g_img_scan_interval = atoi(val);
+            else if (strcasecmp(p, "StabilityWait") == 0)
+                g_img_stability_wait = atoi(val);
+            else if (strcasecmp(p, "Backend") == 0)
+                snprintf(g_img_backend, sizeof(g_img_backend), "%s", val);
+            else if (strcasecmp(p, "ScanPath") == 0 && g_img_scan_paths_count < 16)
+                snprintf(g_img_scan_paths[g_img_scan_paths_count++], 1024, "%s", val);
             break;
         }
     }
