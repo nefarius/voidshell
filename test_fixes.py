@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """
-test_fixes.py — VoidShell bug-fix verification suite
+test_fixes.py — VoidShell bug-fix and feature verification suite
 
-Covers all 13 fixes applied to webserver.c and index.html.
+Covers all 13 bug fixes plus the image-mount integration
+(image_mount.h/c, config [ImageMount] section, REST endpoints,
+thread, and dashboard Images tab).
 
 Modes:
     python3 test_fixes.py           # static + HTTP protocol tests, then exit
@@ -31,9 +33,14 @@ from pathlib import Path
 # ---------------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------------
-ROOT      = Path(__file__).parent
-WEBSERVER = ROOT / "src" / "webserver.c"
-HTML      = ROOT / "index.html"
+ROOT          = Path(__file__).parent
+WEBSERVER     = ROOT / "src" / "webserver.c"
+HTML          = ROOT / "index.html"
+CONFIG_C      = ROOT / "src" / "config.c"
+TYPES_H       = ROOT / "src" / "types.h"
+GLOBALS_C     = ROOT / "src" / "globals.c"
+IMAGE_MOUNT_H = ROOT / "src" / "image_mount.h"
+IMAGE_MOUNT_C = ROOT / "src" / "image_mount.c"
 
 MOCK_PORT     = 17007  # test-only REST mock (avoids conflict with real VoidShell on 7007)
 PKG_MOCK_PORT = 19200  # test-only PKG mock  (avoids conflict with real PKG server on 9200/12576)
@@ -237,12 +244,117 @@ def test_static_html() -> None:
 
 
 # ---------------------------------------------------------------------------
+# STATIC CHECKS — image mount integration
+# ---------------------------------------------------------------------------
+def test_static_image_mount() -> None:
+    section("image_mount integration — static source checks")
+
+    # --- new files exist ---
+    check("IMG  src/image_mount.h exists", IMAGE_MOUNT_H.exists())
+    check("IMG  src/image_mount.c exists", IMAGE_MOUNT_C.exists())
+
+    # --- types.h: new types ---
+    th = slurp(TYPES_H)
+    check("IMG  types.h defines MAX_IMAGE_MOUNTS",         "MAX_IMAGE_MOUNTS" in th)
+    check("IMG  types.h defines image_mount_entry_t",      "image_mount_entry_t" in th)
+    check("IMG  types.h defines image_fs_type_e",          "image_fs_type_e" in th)
+    check("IMG  types.h defines attach_backend_e",         "attach_backend_e" in th)
+    check("IMG  types.h declares extern image_cache[]",    "extern image_mount_entry_t image_cache" in th)
+    check("IMG  types.h declares g_img_scan_interval",     "g_img_scan_interval" in th)
+    check("IMG  types.h declares g_img_scan_paths",        "g_img_scan_paths" in th)
+
+    # --- globals.c: definitions ---
+    gc = slurp(GLOBALS_C)
+    check("IMG  globals.c defines image_cache[]",          "image_mount_entry_t image_cache[MAX_IMAGE_MOUNTS]" in gc)
+    check("IMG  globals.c defines g_img_mount_ro",         "g_img_mount_ro" in gc)
+    check("IMG  globals.c defines g_img_scan_interval",    "g_img_scan_interval" in gc)
+    check("IMG  globals.c defines g_img_backend",          "g_img_backend" in gc)
+
+    # --- config.c: [ImageMount] section ---
+    cc = slurp(CONFIG_C)
+    check("IMG  config.c has section index 8 = [ImageMount]",  "8 = [ImageMount]" in cc)
+    check("IMG  config.c detects [ImageMount] header",         '"[ImageMount]"' in cc or "[ImageMount]" in cc)
+    check("IMG  config.c parses ReadOnly key",                 "ReadOnly" in cc and "g_img_mount_ro" in cc)
+    check("IMG  config.c parses ScanInterval key",             '"ScanInterval"' in cc or "ScanInterval" in cc and "g_img_scan_interval" in cc)
+    check("IMG  config.c parses ScanPath key",                 "ScanPath" in cc and "g_img_scan_paths" in cc)
+    check("IMG  DEFAULT_CONFIG includes [ImageMount] section", "[ImageMount]" in cc and "ScanInterval=30" in cc)
+
+    # --- image_mount.h: public API ---
+    ih = slurp(IMAGE_MOUNT_H)
+    check("IMG  image_mount.h declares image_mount_init()",         "image_mount_init" in ih)
+    check("IMG  image_mount.h declares image_mount_scan()",         "image_mount_scan" in ih)
+    check("IMG  image_mount.h declares image_mount_shutdown()",     "image_mount_shutdown" in ih)
+    check("IMG  image_mount.h declares image_mount_list_json()",    "image_mount_list_json" in ih)
+    check("IMG  image_mount.h declares image_mount_unmount_by_path()", "image_mount_unmount_by_path" in ih)
+
+    # --- image_mount.c: key implementation details ---
+    ic = slurp(IMAGE_MOUNT_C)
+    check("IMG  image_mount.c includes sys/uio.h (struct iovec)",   "#include <sys/uio.h>" in ic)
+    check("IMG  image_mount.c includes sys/mdioctl.h",              "#include <sys/mdioctl.h>" in ic)
+    check("IMG  image_mount.c defines LVD_CTRL_PATH",               'LVD_CTRL_PATH' in ic)
+    check("IMG  image_mount.c defines MD_CTRL_PATH",                'MD_CTRL_PATH' in ic)
+    check("IMG  image_mount.c defines SCE_LVD_IOC_ATTACH",          "SCE_LVD_IOC_ATTACH" in ic)
+    check("IMG  image_mount.c defines IOVEC_ENTRY macro",           "IOVEC_ENTRY" in ic)
+    check("IMG  image_mount.c has detect_image_fs_type()",          "detect_image_fs_type" in ic)
+    check("IMG  image_mount.c has build_image_mount_point()",       "build_image_mount_point" in ic)
+    check("IMG  image_mount.c has mount_image()",                   "mount_image" in ic)
+    check("IMG  image_mount.c has unmount_image()",                 "unmount_image" in ic)
+    check("IMG  image_mount.c uses g_img_mount_ro config",          "g_img_mount_ro" in ic)
+    check("IMG  image_mount.c uses g_img_scan_paths",               "g_img_scan_paths" in ic)
+    check("IMG  image_mount.c emits JSON array in list_json()",     '"]"' in ic or '"]' in ic)
+
+    # --- main.c: thread + shutdown ---
+    mc = slurp(ROOT / "src" / "main.c")
+    check("IMG  main.c includes image_mount.h",                     '#include "image_mount.h"' in mc)
+    check("IMG  main.c has thread_image_scan_loop()",               "thread_image_scan_loop" in mc)
+    check("IMG  main.c spawns thread_image_scan_loop",              "thread_image_scan_loop" in mc and "pthread_create" in mc)
+    check("IMG  main.c calls image_mount_shutdown() before exit",   "image_mount_shutdown()" in mc)
+
+    # --- webserver.c: REST endpoints ---
+    ws = slurp(WEBSERVER)
+    check("IMG  webserver.c includes image_mount.h",                '#include "image_mount.h"' in ws)
+    check("IMG  webserver.c has GET /api/images route",             "/api/images" in ws and "image_mount_list_json" in ws)
+    check("IMG  webserver.c has POST /api/images/unmount route",    "/api/images/unmount" in ws and "image_mount_unmount_by_path" in ws)
+
+    # --- Makefile ---
+    mk = slurp(ROOT / "Makefile")
+    check("IMG  Makefile includes image_mount.c in SRCS",           "image_mount.c" in mk)
+
+    # --- index.html: Images tab ---
+    html = slurp(HTML)
+    check("IMG  index.html has 'images' tab entry",                 "'images'" in html or '"images"' in html)
+    check("IMG  index.html has hard-drive icon for Images tab",     "hard-drive" in html)
+    check("IMG  index.html defines Images component",               "const Images =" in html)
+    check("IMG  index.html renders <Images /> in tab switcher",     "<Images " in html)
+    check("IMG  Images component fetches /api/images",              "api/images" in html)
+    check("IMG  Images component POSTs to /api/images/unmount",     "api/images/unmount" in html)
+    check("IMG  Images component shows 'No images mounted' empty state",
+          "No images mounted" in html)
+
+
+# ---------------------------------------------------------------------------
 # MOCK PS5 HTTP SERVER
 # ---------------------------------------------------------------------------
 MOCK_GAMES = [
     {"id": "PPSA01234", "name": "Mock Game PS5", "size": 53_687_091_200, "exists": True},
     {"id": "CUSA00042", "name": "Mock Game PS4", "size": 21_474_836_480, "exists": True},
     {"id": "PPSA99999", "name": "Ghost Game",    "size": 0,              "exists": False},
+]
+
+# In-memory image mount state for mock server tests
+_mock_images: list[dict] = [
+    {
+        "path":        "/mnt/usb0/game1.exfat",
+        "mount_point": "/data/imgmnt/exfatmnt/game1",
+        "backend":     "lvd",
+        "unit":        0,
+    },
+    {
+        "path":        "/mnt/usb0/dlc.ffpkg",
+        "mount_point": "/data/imgmnt/ufsmnt/dlc",
+        "backend":     "lvd",
+        "unit":        1,
+    },
 ]
 
 # 1×1 transparent PNG
@@ -322,6 +434,11 @@ class MockHandler(BaseHTTPRequestHandler):
                            b"Missing or malformed ?id= parameter")
             return
 
+        # Images API
+        if path == "/api/images":
+            self._json(_mock_images)
+            return
+
         # API routes
         dispatch = {
             "/api/stats": lambda: self._json({
@@ -385,6 +502,16 @@ class MockHandler(BaseHTTPRequestHandler):
         if path == "/api/notify":
             msg = body.decode("utf-8", errors="replace").strip()
             self._json({"status": "ok", "message": msg})
+            return
+
+        if path == "/api/images/unmount":
+            src_path = body.decode("utf-8", errors="replace").strip()
+            removed = any(img["path"] == src_path for img in _mock_images)
+            if removed:
+                _mock_images[:] = [i for i in _mock_images if i["path"] != src_path]
+                self._ok()
+            else:
+                self._json({"status": "error"}, 200)
             return
 
         if path in ("/api/rescan", "/api/pause", "/api/repair",
@@ -544,6 +671,41 @@ def test_protocol(rest_port: int = MOCK_PORT, pkg_port: int = PKG_MOCK_PORT) -> 
     except Exception as exc:
         check("IMP3  /delete rejects '..' path traversal", False, str(exc))
 
+    # Image mount endpoints
+    try:
+        s, h, b = http_get("/api/images", rest_port)
+        data = json.loads(b)
+        check("IMG  GET /api/images → 200 JSON array",
+              s == 200 and isinstance(data, list))
+        check("IMG  GET /api/images response has ≥1 entry with required fields",
+              len(data) > 0 and all(
+                  k in data[0] for k in ("path", "mount_point", "backend", "unit")
+              ))
+    except Exception as exc:
+        check("IMG  GET /api/images", False, str(exc))
+
+    try:
+        target = b"/mnt/usb0/game1.exfat"
+        s, _, b = http_post("/api/images/unmount", target, rest_port)
+        data = json.loads(b)
+        check("IMG  POST /api/images/unmount (known path) → status ok",
+              s == 200 and data.get("status") == "ok")
+        # Verify the entry was actually removed
+        s2, _, b2 = http_get("/api/images", rest_port)
+        remaining = json.loads(b2)
+        check("IMG  POST /api/images/unmount removes entry from list",
+              all(i["path"] != "/mnt/usb0/game1.exfat" for i in remaining))
+    except Exception as exc:
+        check("IMG  POST /api/images/unmount", False, str(exc))
+
+    try:
+        s, _, b = http_post("/api/images/unmount", b"/nonexistent/path.exfat", rest_port)
+        data = json.loads(b)
+        check("IMG  POST /api/images/unmount (unknown path) → status error",
+              data.get("status") == "error")
+    except Exception as exc:
+        check("IMG  POST /api/images/unmount (unknown path)", False, str(exc))
+
     # Stats endpoint includes new fields
     try:
         s, _, b = http_get("/api/stats", rest_port)
@@ -591,6 +753,7 @@ def main() -> None:
     # Static checks (no network needed)
     test_static_webserver()
     test_static_html()
+    test_static_image_mount()
 
     # Start mock servers (fall back to OS-assigned port if preferred is busy)
     rest_srv, rest_port = start_server(MockHandler,    MOCK_PORT)
