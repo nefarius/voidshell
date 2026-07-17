@@ -79,7 +79,6 @@ voidshell/
 │   ├── template.html    # Shell + Tailwind CDN
 │   └── build.ts         # Bundles JS into a single HTML file
 ├── www/index.html       # Built dashboard (deploy this to the PS5)
-├── index.html           # Same built dashboard (synced for legacy paths)
 ├── Makefile
 ├── deploy.sh            # Build + send to PS5
 └── .github/workflows/   # CI: ELF + frontend → GitHub Release
@@ -87,14 +86,14 @@ voidshell/
 
 ### Frontend
 
-The dashboard is a **Bun-compiled Preact** app (`ui/`) that produces one self-contained file with no React/Babel CDN dependency (Tailwind still loads from CDN).
+The dashboard is a **Bun-compiled Preact** app (`ui/`) that produces one self-contained file with no React/Babel CDN dependency (Tailwind still loads from CDN). There is no root-level `index.html` source — only the built output under `www/`.
 
 ```bash
 cd ui
 bun install
 bun run build          # → www/index.html
 
-# or from repo root (also copies into build/www/ and syncs index.html):
+# or from repo root (also stages build/www/index.html for deploy):
 make www
 ```
 
@@ -125,7 +124,7 @@ sudo apt-get install -y bash clang-18 lld-18 wget unzip make
 ```bash
 make              # → build/voidshell.elf
 make clean && make
-make all-deploy   # ELF + copy index.html into build/www/
+make all-deploy   # ELF + build dashboard into build/www/
 ```
 
 If `PS5_PAYLOAD_SDK` is only set in an interactive shell:
@@ -153,7 +152,7 @@ The script builds the ELF, stages `build/www/index.html`, and sends the payload 
 nc -w 5 192.168.1.17 9021 < build/voidshell.elf
 ```
 
-Remember to place `index.html` at `/data/voidshell/www/index.html` when updating the UI.
+Remember to place `www/index.html` at `/data/voidshell/www/index.html` when updating the UI.
 
 ---
 

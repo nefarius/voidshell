@@ -35,7 +35,7 @@ from pathlib import Path
 # ---------------------------------------------------------------------------
 ROOT          = Path(__file__).parent
 WEBSERVER     = ROOT / "src" / "webserver.c"
-HTML          = ROOT / "index.html"
+HTML          = ROOT / "www" / "index.html"
 CONFIG_C      = ROOT / "src" / "config.c"
 TYPES_H       = ROOT / "src" / "types.h"
 GLOBALS_C     = ROOT / "src" / "globals.c"

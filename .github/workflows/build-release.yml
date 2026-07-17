@@ -54,8 +54,6 @@ jobs:
           bun install --frozen-lockfile
           bun run build
           test -f ../www/index.html
-          # Keep root index.html in sync for deploy docs and legacy paths
-          cp ../www/index.html ../index.html
           # Sanity: must be the bundled Preact build, not CDN React+Babel
           ! grep -q 'unpkg.com/react' ../www/index.html
           ! grep -q '@babel/standalone' ../www/index.html

@@ -77,12 +77,10 @@ $(BUILDDIR)/%.o: $(SRCDIR)/%.c
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 # Dashboard: Bun + Preact sources in ui/ → single-file www/index.html
-# Also syncs to repo-root index.html for deploy scripts / legacy paths.
 www:
 	cd ui && bun install --frozen-lockfile && bun run build
 	mkdir -p $(BUILDDIR)/www
 	cp www/index.html $(BUILDDIR)/www/index.html
-	cp www/index.html index.html
 	@echo "Built and copied: $(BUILDDIR)/www/index.html"
 
 all-deploy: all www
