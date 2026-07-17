@@ -1,140 +1,172 @@
-# VoidShell V1.1
+# VoidShell
 
-A PS5 homebrew management daemon. Runs as a background process after jailbreak, providing a web-based dashboard for game library management, PKG installation, payload injection, and system monitoring.
+**PS5 homebrew management daemon** — runs after jailbreak and exposes a web dashboard for library management, PKG installs, payload injection, disk-image mounts, fan control, and system monitoring.
+
+[![Build](https://github.com/amilarajans/voidshell/actions/workflows/build-release.yml/badge.svg)](https://github.com/amilarajans/voidshell/actions/workflows/build-release.yml)
+[![Release](https://img.shields.io/github/v/release/amilarajans/voidshell?include_prereleases)](https://github.com/amilarajans/voidshell/releases/latest)
+
+| | |
+|---|---|
+| **Version** | V1.1 |
+| **Target** | Jailbroken PS5 (etaHEN / kstuff-compatible firmware) |
+| **Dashboard** | `http://<ps5-ip>:7007` |
+| **Binary** | `voidshell.elf` |
 
 ---
 
-## Requirements
+## Features
+
+- **Web dashboard** — library browser, live temps/uptime, session tracking
+- **PKG manager** — upload, install from URL, manage local PKG files
+- **Payload runner** — inject ELF/BIN payloads; configure auto-run at boot
+- **Image mounts** — mount `.exfat`, `.ffpfs`, `.ffpkg` images for game storage
+- **Sentinel Warden** — toggles kstuff per-app so non-whitelisted titles are less likely to trip anti-cheat
+- **Fan control** — target-temperature fan management via `/dev/icc_fan`
+- **Library tools** — rescan, icon/metadata repair, custom scan paths
+- **REST API** — full control from any device on the LAN
+
+---
+
+## Quick start (prebuilt release)
+
+1. Jailbreak the PS5 (etaHEN / compatible stack listening on **port 9021**).
+2. Download the latest **`voidshell.elf`** (and `index.html`) from  
+   **[Releases](https://github.com/amilarajans/voidshell/releases/latest)**.
+3. Send the payload:
+
+```bash
+nc -w 5 <ps5-ip> 9021 < voidshell.elf
+# or
+socat - TCP:<ps5-ip>:9021 < voidshell.elf
+```
+
+4. Copy the dashboard once (or whenever it changes):
+
+```text
+index.html  →  /data/voidshell/www/index.html
+```
+
+Use FTP, SSH, or any file transfer your jailbreak provides.
+
+5. Open the dashboard:
+
+```text
+http://<ps5-ip>:7007
+```
+
+---
+
+## Requirements (build from source)
 
 | Requirement | Notes |
 |---|---|
 | PS5 with jailbreak (etaHEN) | kstuff-compatible firmware |
-| [ps5-payload-sdk](https://github.com/ps5-payload-dev/sdk) | Installed at `/opt/ps5-payload-sdk` |
-| WSL2 (Ubuntu 24.04) | Or any Linux with the SDK installed |
-| `nc` or `socat` | For sending the payload to the PS5 |
+| [ps5-payload-sdk](https://github.com/ps5-payload-dev/sdk) | Install under `/opt/ps5-payload-sdk` |
+| Linux or WSL2 (Ubuntu 24.04 recommended) | Host for the cross-toolchain |
+| `clang` / `lld` (SDK docs recommend clang-18) | Used by the Prospero toolchain |
+| `nc` or `socat` | Optional — for `deploy.sh` |
 
 ---
 
-## Project Structure
+## Project structure
 
-```
-voidshell_src/
+```text
+voidshell/
 ├── src/
-│   ├── main.c          # Entry point, startup sequence, main scan loop
-│   ├── webserver.c     # HTTP REST API (port 7007) + PKG server (port 12576)
-│   ├── sentinel.c      # Game watchdog — manages kstuff state per-app
-│   ├── kernel.c        # kstuff kernel exploit interface (r/w primitives)
-│   ├── install.c       # Homebrew installation pipeline (nullfs, SQLite DB patch)
-│   ├── config.c        # INI config parser (/data/voidshell/config.ini)
-│   ├── fan.c           # Fan speed control via /dev/icc_fan ioctl
-│   ├── logging.c       # Timestamped logging to /data/voidshell/logs/
-│   ├── utils.c         # String utilities, JSON helpers, PS5 notifications
-│   ├── globals.c       # Global variable definitions
-│   ├── types.h         # Shared types, struct definitions, extern declarations
-│   └── ps5_sdk.h       # PS5 SDK function forward declarations
-├── index.html          # Web dashboard (React SPA — copy to PS5)
+│   ├── main.c           # Entry point, startup, main scan loop
+│   ├── webserver.c      # HTTP REST API + static dashboard + PKG server
+│   ├── sentinel.c       # Game watchdog — kstuff on/off per app
+│   ├── kernel.c         # kstuff / kernel r/w helpers
+│   ├── install.c        # Homebrew install pipeline (nullfs, DB patch)
+│   ├── image_mount.c    # .exfat / .ffpfs / .ffpkg mount engine
+│   ├── config.c         # INI config (/data/voidshell/config.ini)
+│   ├── fan.c            # Fan control
+│   ├── logging.c        # Timestamped logs under /data/voidshell/logs/
+│   ├── utils.c          # Strings, JSON helpers, notifications
+│   ├── globals.c        # Global state
+│   ├── types.h          # Shared types and externs
+│   └── ps5_sdk.h        # PS5 SDK forward declarations
+├── index.html           # Web dashboard (single-file SPA)
 ├── Makefile
-└── deploy.sh           # One-command build + deploy script
+├── deploy.sh            # Build + send to PS5
+└── .github/workflows/   # CI build & release of voidshell.elf
 ```
 
 ---
 
 ## Building
 
-### First-time SDK setup
-
-Install the ps5-payload-sdk into WSL2 (Ubuntu 24.04):
+### Install the SDK
 
 ```bash
-# Follow the official SDK install instructions, then verify:
-ls /opt/ps5-payload-sdk/toolchain/prospero.mk
-```
+# Binary SDK distribution (easiest)
+wget https://github.com/ps5-payload-dev/sdk/releases/latest/download/ps5-payload-sdk.zip
+sudo unzip -d /opt ps5-payload-sdk.zip
 
-If `PS5_PAYLOAD_SDK` is not in your PATH, add it to `~/.bashrc`:
-
-```bash
 export PS5_PAYLOAD_SDK=/opt/ps5-payload-sdk
+# Optional: add the export to ~/.bashrc
 ```
 
-### Build
-
-Open a WSL2 terminal in the `voidshell_src/` directory:
+Prerequisites (Debian/Ubuntu):
 
 ```bash
-# Full build
-make
-
-# Clean + rebuild
-make clean && make
-
-# Build ELF + copy dashboard to build/www/
-make all-deploy
+sudo apt-get update
+sudo apt-get install -y bash clang-18 lld-18 wget unzip make
 ```
 
-Output: `build/voidshell.elf`
+### Compile
 
-> **Note:** Use `bash -i` if `PS5_PAYLOAD_SDK` is only set in `.bashrc`:
-> ```bash
-> bash -i -c "make clean && make"
-> ```
+```bash
+make              # → build/voidshell.elf
+make clean && make
+make all-deploy   # ELF + copy index.html into build/www/
+```
+
+If `PS5_PAYLOAD_SDK` is only set in an interactive shell:
+
+```bash
+bash -i -c "make clean && make"
+```
 
 ---
 
-## Deploying to PS5
+## Deploying to a PS5
 
-### Option 1 — deploy.sh (recommended)
+### One-shot script
 
 ```bash
-# Build + send in one command
-./deploy.sh 192.168.1.17
-
-# Send without rebuilding
-./deploy.sh 192.168.1.17 --no-build
+./deploy.sh 192.168.1.17            # build + www + send
+./deploy.sh 192.168.1.17 --no-build # send existing ELF
 ```
 
-The script:
-1. Builds `build/voidshell.elf`
-2. Copies `index.html` → `build/www/index.html`
-3. Sends the ELF to the PS5 via `nc` (falls back to `socat`)
-4. Prints the dashboard URL on success
+The script builds the ELF, stages `build/www/index.html`, and sends the payload to port **9021**.
 
-### Option 2 — manual
+### Manual
 
 ```bash
-# Send the ELF payload (PS5 must be jailbroken, etaHEN listening on 9021)
 nc -w 5 192.168.1.17 9021 < build/voidshell.elf
-
-# Or with socat
-socat - TCP:192.168.1.17:9021 < build/voidshell.elf
 ```
 
-### Copy the dashboard
-
-Copy `index.html` to the PS5 at `/data/voidshell/www/index.html`. This only needs to be done once (or when the dashboard is updated). You can do this via FTP, SSH, or any file transfer method available on your jailbreak.
+Remember to place `index.html` at `/data/voidshell/www/index.html` when updating the UI.
 
 ---
 
 ## Dashboard
 
-Once VoidShell is running on the PS5, open a browser on any device on the same network:
-
-```
-http://<ps5-ip>:7007
-```
-
-| Feature | Description |
+| Tab / area | Description |
 |---|---|
-| **Home** | System stats, game library, featured game carousel |
-| **PKG** | Upload and install PKG files, remote URL install |
-| **Payloads** | Inject ELF payloads, configure auto-run on startup |
-| **Settings** | Fan control, Sentinel Warden config, blacklist/whitelist |
-| **Logs** | Live system log viewer with filter and auto-scroll |
+| **Home** | Temps, uptime, library, session stats |
+| **PKG** | Upload / install PKG files and remote URLs |
+| **Payloads** | List and inject ELF/BIN from `/data/voidshell/payloads/` |
+| **Images** | View / unmount mounted storage images |
+| **Settings** | Fan, Sentinel, raw `config.ini` editor |
+| **Logs** | Live log viewer |
 
 ---
 
 ## Configuration
 
-VoidShell reads `/data/voidshell/config.ini` on startup. A default config is created automatically on first run.
+Config path: **`/data/voidshell/config.ini`** (created with defaults on first run).
 
 ```ini
 [Settings]
@@ -153,7 +185,7 @@ ResumeDelay=3000        ; ms to wait on app resume
 ShowDebugNotify=false
 
 [SentinelWhitelist]
-; Title IDs that are allowed to run with kstuff enabled
+; Title IDs allowed to run with kstuff enabled
 ; PPSA01650
 
 [AutoPayloads]
@@ -161,69 +193,118 @@ ShowDebugNotify=false
 ; etahen.elf=0
 
 [CustomPaths]
-; Additional scan paths (one per line)
+; Extra library scan paths
 ; /mnt/usb0/games
 ```
 
+Working directories created at runtime:
+
+```text
+/data/voidshell/
+├── www/        # dashboard
+├── logs/       # debug / startup logs
+├── payloads/   # ELF/BIN drop folder
+└── config.ini
+```
+
 ---
 
-## API Reference
+## REST API
 
-The REST API runs on port 7007.
+Base URL: `http://<ps5-ip>:7007`
 
 | Method | Endpoint | Description |
 |---|---|---|
-| GET | `/api/stats` | System stats (temps, uptime, active game, session count, version) |
-| GET | `/api/library` | Full installed game library (PS5 + PS4) |
-| GET | `/api/payloads` | Available ELF/BIN files in `/data/voidshell/payloads/` |
-| GET | `/api/session` | Titles installed this boot `{"count":N,"installed":[...]}` |
+| GET | `/api/stats` | Temps, uptime, active game, counts, version |
+| GET | `/api/library` | Installed PS5 + PS4 library |
+| GET | `/api/payloads` | Files in `/data/voidshell/payloads/` |
+| GET | `/api/session` | Titles installed this boot |
 | GET | `/api/version` | `{"version":"V1.1"}` |
-| GET | `/api/config_raw` | Raw config.ini text |
-| GET | `/api/logs` | Last 64 KB of debug log |
-| POST | `/api/logs/clear` | Clear debug log |
-| POST | `/api/launch` | Launch app by title ID (body: `PPSA01234`) |
-| POST | `/api/send_payload` | Inject payload by filename (body: `etahen.elf`) |
-| POST | `/api/rescan` | Trigger library rescan |
+| GET | `/api/config_raw` | Raw `config.ini` |
+| GET | `/api/logs` | Last ~64 KB of debug log |
+| GET | `/api/images` | Currently mounted images |
+| POST | `/api/logs/clear` | Truncate debug log |
+| POST | `/api/launch` | Launch by title ID (body: `PPSA01234`) |
+| POST | `/api/send_payload` | Inject payload by filename |
+| POST | `/api/rescan` | Rescan library |
 | POST | `/api/pause` | Toggle scanner pause |
-| POST | `/api/repair` | Trigger icon/metadata repair |
-| POST | `/api/notify` | Send a PS5 notification popup (body: message text) |
-| POST | `/api/save_ini` | Save config (body: raw INI text) |
+| POST | `/api/repair` | Icon / metadata repair |
+| POST | `/api/notify` | On-console notification |
+| POST | `/api/save_ini` | Save config + reload |
+| POST | `/api/images/unmount` | Unmount image by path |
 
-PKG install server runs on port **12576** and is used internally by the dashboard.
+PKG helper endpoints run on a separate port used by the dashboard (see `webserver.c` / UI for the active port).
+
+> **Security note:** The API is open on the LAN by design for homebrew convenience. Do not expose a jailbroken PS5 to untrusted networks.
 
 ---
 
-## How It Works
+## How it works
 
-```
+```text
 [PS5 Jailbreak]
        |
        v
- voidshell.elf loaded by etaHEN / kstuff
+ voidshell.elf  (etaHEN / elfldr on :9021)
        |
-       +-- setuid(0) + kernel_set_ucred_authid (privilege escalation)
-       +-- init_work_dirs()     /data/voidshell/{www,logs,payloads}
-       +-- init_kernel_offsets() firmware detection + kstuff setup
-       +-- load_config()        /data/voidshell/config.ini
-       +-- detect_local_ip()    UDP connect trick → getsockname
+       +-- privilege setup (setuid / authid)
+       +-- /data/voidshell/{www,logs,payloads}
+       +-- firmware offsets + kstuff init
+       +-- load config.ini
+       +-- detect LAN IP
        |
-       +-- [Thread] thread_web_server       port 7007  REST API + dashboard
-       +-- [Thread] thread_pkg_server       port 12576 PKG upload + install
-       +-- [Thread] thread_stats_monitor    CPU/SoC temps, uptime (2s)
-       +-- [Thread] thread_autorun_payloads send configured payloads at boot
-       +-- [Thread] thread_klog_monitor     /dev/klog → detect game launches
-       +-- [Thread] thread_sentinel_logic   manage kstuff ON/OFF per game
+       +-- [Thread] web server      :7007  REST + dashboard
+       +-- [Thread] PKG server             upload / install
+       +-- [Thread] stats monitor          CPU/SoC temps, uptime
+       +-- [Thread] autorun payloads       boot-time injects
+       +-- [Thread] klog monitor           game launch detection
+       +-- [Thread] sentinel               kstuff ON/OFF per title
+       +-- [Thread] image scan             disk image discovery
        |
-       +-- [Main loop] scan homebrew paths, refresh library, handle commands
+       +-- [Main]   library scan loop + command handling
 ```
 
-**Sentinel Warden**: When a non-whitelisted game runs, VoidShell disables kstuff (sets syscall count to `0xFFFF`) after a configurable delay. This prevents game anti-cheat from detecting the exploit. On return to the menu, kstuff is re-enabled (`0xDEB7`).
+**Sentinel Warden** — for non-whitelisted titles, VoidShell disables kstuff after a configurable delay (syscall table marker `0xFFFF`). On return to the menu, kstuff is re-enabled (`0xDEB7`). Whitelisted title IDs keep kstuff active.
 
 ---
 
-## Version History
+## CI / releases
+
+GitHub Actions (`.github/workflows/build-release.yml`):
+
+- Builds `voidshell.elf` with the official **ps5-payload-sdk** on every push/PR
+- Uploads build artifacts for download from the Actions run
+- On version tags (`v*`), publishes a **GitHub Release** with:
+  - `voidshell.elf`
+  - `index.html`
+  - `SHA256SUMS`
+
+Create a release from a tag:
+
+```bash
+git tag v1.1.0
+git push origin v1.1.0
+```
+
+---
+
+## Version history
 
 | Version | Changes |
 |---|---|
-| V1.1 | Extended date window (all of 2026), function cleanup, new API endpoints, improved dashboard |
-| V1.00 Pre-Beta | Initial beta release (Feb 8–20 2026 window) |
+| **V1.1** | Broader date window, API/dashboard improvements, image mount (`.exfat` / `.ffpfs` / `.ffpkg`) |
+| **V1.00 Pre-Beta** | Initial beta (Feb 2026 window) |
+
+---
+
+## Disclaimer
+
+This project is intended for **homebrew research and personal use** on consoles you own. Jailbreaking and running unsigned code may void warranties and violate terms of service. You are responsible for complying with local law and platform rules. No warranty is provided — use at your own risk.
+
+---
+
+## Credits
+
+- Original VoidShell design / binary lineage: **VoidWhisper**
+- Toolchain: [ps5-payload-dev/sdk](https://github.com/ps5-payload-dev/sdk)
+- Jailbreak ecosystem: etaHEN / kstuff and related community work

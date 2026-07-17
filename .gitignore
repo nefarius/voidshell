@@ -1,1 +1,26 @@
-build
+# Build output
+build/
+dist/
+
+# IDE / editor
+.idea/
+.vscode/
+*.swp
+*~
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Frontend (Bun / Node) — keep sources, ignore deps
+ui/node_modules/
+**/node_modules/
+
+# Local tooling / reverse-engineering scratch
+function_hash_index.json
+
+# OS junk
+.DS_Store
+Thumbs.db
