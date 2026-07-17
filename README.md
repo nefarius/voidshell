@@ -40,10 +40,12 @@ nc -w 5 <ps5-ip> 9021 < voidshell.elf
 socat - TCP:<ps5-ip>:9021 < voidshell.elf
 ```
 
-4. Copy the **built** dashboard once (or whenever it changes):
+4. Copy the **built** dashboard once (or whenever it changes). Get it from a
+   [Release](https://github.com/amilarajans/voidshell/releases/latest) (`index.html`)
+   or build it locally (`make www` → `www/index.html`):
 
 ```text
-www/index.html   (or release asset index.html)
+index.html  (release)  or  www/index.html  (local build)
         →  /data/voidshell/www/index.html
 ```
 
@@ -78,25 +80,25 @@ voidshell/
 │   ├── src/             # App, tabs, components
 │   ├── template.html    # Shell + Tailwind CDN
 │   └── build.ts         # Bundles JS into a single HTML file
-├── www/index.html       # Built dashboard (deploy this to the PS5)
 ├── Makefile
 ├── deploy.sh            # Build + send to PS5
 └── .github/workflows/   # CI: ELF + frontend → GitHub Release
 ```
 
+Generated at build time (gitignored): `www/index.html`, `build/`.
+
 ### Frontend
 
-The dashboard is a **Bun-compiled Preact** app (`ui/`) that produces one self-contained file with no React/Babel CDN dependency (Tailwind still loads from CDN). There is no root-level `index.html` source — only the built output under `www/`.
+The dashboard is a **Bun-compiled Preact** app (`ui/`). The built file is **not** committed — run the build (or CI) to produce it. Output is a single HTML file with no React/Babel CDN dependency (Tailwind still loads from CDN).
 
 ```bash
 cd ui
 bun install
-bun run build          # → www/index.html
+bun run build          # → www/index.html (local, gitignored)
 
 # or from repo root (also stages build/www/index.html for deploy):
 make www
 ```
-
 ---
 
 ## Building
@@ -152,7 +154,7 @@ The script builds the ELF, stages `build/www/index.html`, and sends the payload 
 nc -w 5 192.168.1.17 9021 < build/voidshell.elf
 ```
 
-Remember to place `www/index.html` at `/data/voidshell/www/index.html` when updating the UI.
+Remember to place the built dashboard at `/data/voidshell/www/index.html` when updating the UI.
 
 ---
 
@@ -277,7 +279,7 @@ PKG helper endpoints run on a separate port used by the dashboard (see `webserve
 
 GitHub Actions (`.github/workflows/build-release.yml`):
 
-- Builds the **Preact dashboard** with Bun (`ui/` → `www/index.html`)
+- Builds the **Preact dashboard** with Bun from `ui/` (output is not stored in git)
 - Builds `voidshell.elf` with the official **ps5-payload-sdk**
 - Uploads build artifacts for download from the Actions run
 - On version tags (`v*`), publishes a **GitHub Release** with:

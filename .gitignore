@@ -1,6 +1,7 @@
 # Build output
 build/
 dist/
+www/
 
 # IDE / editor
 .idea/

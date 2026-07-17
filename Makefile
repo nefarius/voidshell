@@ -76,7 +76,7 @@ $(BUILDDIR)/sqlite3.o: $(SRCDIR)/sqlite3.c
 $(BUILDDIR)/%.o: $(SRCDIR)/%.c
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-# Dashboard: Bun + Preact sources in ui/ → single-file www/index.html
+# Dashboard: Bun + Preact sources in ui/ → generated www/index.html (not committed)
 www:
 	cd ui && bun install --frozen-lockfile && bun run build
 	mkdir -p $(BUILDDIR)/www
@@ -86,4 +86,4 @@ www:
 all-deploy: all www
 
 clean:
-	rm -rf $(BUILDDIR)
+	rm -rf $(BUILDDIR) www
