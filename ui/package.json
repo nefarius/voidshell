@@ -1,0 +1,16 @@
+{
+  "name": "voidshell-ui",
+  "version": "1.1.0",
+  "scripts": {
+    "build": "bun run build.ts",
+    "dev": "bun --watch run build.ts"
+  },
+  "dependencies": {
+    "preact": "^10.24.3",
+    "lucide-preact": "^0.462.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0",
+    "@types/node": "^22.0.0"
+  }
+}

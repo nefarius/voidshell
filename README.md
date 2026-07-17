@@ -40,10 +40,11 @@ nc -w 5 <ps5-ip> 9021 < voidshell.elf
 socat - TCP:<ps5-ip>:9021 < voidshell.elf
 ```
 
-4. Copy the dashboard once (or whenever it changes):
+4. Copy the **built** dashboard once (or whenever it changes):
 
 ```text
-index.html  →  /data/voidshell/www/index.html
+www/index.html   (or release asset index.html)
+        →  /data/voidshell/www/index.html
 ```
 
 Use FTP, SSH, or any file transfer your jailbreak provides.
@@ -72,24 +73,29 @@ http://<ps5-ip>:7007
 
 ```text
 voidshell/
-├── src/
-│   ├── main.c           # Entry point, startup, main scan loop
-│   ├── webserver.c      # HTTP REST API + static dashboard + PKG server
-│   ├── sentinel.c       # Game watchdog — kstuff on/off per app
-│   ├── kernel.c         # kstuff / kernel r/w helpers
-│   ├── install.c        # Homebrew install pipeline (nullfs, DB patch)
-│   ├── image_mount.c    # .exfat / .ffpfs / .ffpkg mount engine
-│   ├── config.c         # INI config (/data/voidshell/config.ini)
-│   ├── fan.c            # Fan control
-│   ├── logging.c        # Timestamped logs under /data/voidshell/logs/
-│   ├── utils.c          # Strings, JSON helpers, notifications
-│   ├── globals.c        # Global state
-│   ├── types.h          # Shared types and externs
-│   └── ps5_sdk.h        # PS5 SDK forward declarations
-├── index.html           # Web dashboard (single-file SPA)
+├── src/                 # PS5 daemon (C)
+├── ui/                  # Preact + TypeScript dashboard (built with Bun)
+│   ├── src/             # App, tabs, components
+│   ├── template.html    # Shell + Tailwind CDN
+│   └── build.ts         # Bundles JS into a single HTML file
+├── www/index.html       # Built dashboard (deploy this to the PS5)
+├── index.html           # Same built dashboard (synced for legacy paths)
 ├── Makefile
 ├── deploy.sh            # Build + send to PS5
-└── .github/workflows/   # CI build & release of voidshell.elf
+└── .github/workflows/   # CI: ELF + frontend → GitHub Release
+```
+
+### Frontend
+
+The dashboard is a **Bun-compiled Preact** app (`ui/`) that produces one self-contained file with no React/Babel CDN dependency (Tailwind still loads from CDN).
+
+```bash
+cd ui
+bun install
+bun run build          # → www/index.html
+
+# or from repo root (also copies into build/www/ and syncs index.html):
+make www
 ```
 
 ---
@@ -272,11 +278,12 @@ PKG helper endpoints run on a separate port used by the dashboard (see `webserve
 
 GitHub Actions (`.github/workflows/build-release.yml`):
 
-- Builds `voidshell.elf` with the official **ps5-payload-sdk** on every push/PR
+- Builds the **Preact dashboard** with Bun (`ui/` → `www/index.html`)
+- Builds `voidshell.elf` with the official **ps5-payload-sdk**
 - Uploads build artifacts for download from the Actions run
 - On version tags (`v*`), publishes a **GitHub Release** with:
   - `voidshell.elf`
-  - `index.html`
+  - `index.html` (built Preact dashboard)
   - `SHA256SUMS`
 
 Create a release from a tag:

@@ -35,6 +35,11 @@ jobs:
             make \
             ca-certificates
 
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
       - name: Install ps5-payload-sdk
         run: |
           wget -q -O /tmp/ps5-payload-sdk.zip \
@@ -43,7 +48,20 @@ jobs:
           test -f "${PS5_PAYLOAD_SDK}/toolchain/prospero.mk"
           echo "SDK ready at ${PS5_PAYLOAD_SDK}"
 
-      - name: Build
+      - name: Build frontend (Preact / Bun)
+        run: |
+          cd ui
+          bun install --frozen-lockfile
+          bun run build
+          test -f ../www/index.html
+          # Keep root index.html in sync for deploy docs and legacy paths
+          cp ../www/index.html ../index.html
+          # Sanity: must be the bundled Preact build, not CDN React+Babel
+          ! grep -q 'unpkg.com/react' ../www/index.html
+          ! grep -q '@babel/standalone' ../www/index.html
+          ls -lh ../www/index.html
+
+      - name: Build ELF
         run: |
           export PS5_PAYLOAD_SDK="${PS5_PAYLOAD_SDK}"
           make clean
@@ -55,7 +73,7 @@ jobs:
         run: |
           mkdir -p dist
           cp build/voidshell.elf dist/voidshell.elf
-          cp index.html dist/index.html
+          cp www/index.html dist/index.html
           (
             cd dist
             sha256sum voidshell.elf index.html > SHA256SUMS
