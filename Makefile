@@ -85,5 +85,12 @@ www:
 
 all-deploy: all www
 
+# ELF objects only. Frontend output (www/) is separate so `make clean && make`
+# does not destroy a just-built dashboard (CI packages www/ after the ELF step).
 clean:
-	rm -rf $(BUILDDIR) www
+	rm -rf $(BUILDDIR)
+
+clean-www:
+	rm -rf www
+
+distclean: clean clean-www

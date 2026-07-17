@@ -48,6 +48,15 @@ jobs:
           test -f "${PS5_PAYLOAD_SDK}/toolchain/prospero.mk"
           echo "SDK ready at ${PS5_PAYLOAD_SDK}"
 
+      - name: Build ELF
+        run: |
+          export PS5_PAYLOAD_SDK="${PS5_PAYLOAD_SDK}"
+          make clean
+          make -j"$(nproc)"
+          test -f build/voidshell.elf
+          ls -lh build/voidshell.elf
+
+      # After `make clean` so the dashboard is not wiped before packaging.
       - name: Build frontend (Preact / Bun)
         run: |
           cd ui
@@ -59,17 +68,11 @@ jobs:
           ! grep -q '@babel/standalone' ../www/index.html
           ls -lh ../www/index.html
 
-      - name: Build ELF
-        run: |
-          export PS5_PAYLOAD_SDK="${PS5_PAYLOAD_SDK}"
-          make clean
-          make -j"$(nproc)"
-          test -f build/voidshell.elf
-          ls -lh build/voidshell.elf
-
       - name: Package release assets
         run: |
           mkdir -p dist
+          test -f build/voidshell.elf
+          test -f www/index.html
           cp build/voidshell.elf dist/voidshell.elf
           cp www/index.html dist/index.html
           (
