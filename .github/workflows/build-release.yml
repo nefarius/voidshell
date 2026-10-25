@@ -11,9 +11,6 @@ on:
 permissions:
   contents: write
 
-env:
-  PS5_PAYLOAD_SDK: /opt/ps5-payload-sdk
-
 jobs:
   build:
     name: Build voidshell.elf
@@ -23,64 +20,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            bash \
-            clang-18 \
-            lld-18 \
-            wget \
-            unzip \
-            make \
-            ca-certificates
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
-
-      - name: Install ps5-payload-sdk
+      # Pinned SDK and bun versions live in the Dockerfile.
+      - name: Build with Docker
         run: |
-          wget -q -O /tmp/ps5-payload-sdk.zip \
-            "https://github.com/ps5-payload-dev/sdk/releases/latest/download/ps5-payload-sdk.zip"
-          sudo unzip -q -o /tmp/ps5-payload-sdk.zip -d /opt
-          test -f "${PS5_PAYLOAD_SDK}/toolchain/prospero.mk"
-          echo "SDK ready at ${PS5_PAYLOAD_SDK}"
-
-      - name: Build ELF
-        run: |
-          export PS5_PAYLOAD_SDK="${PS5_PAYLOAD_SDK}"
-          make clean
-          make -j"$(nproc)"
-          test -f build/voidshell.elf
-          ls -lh build/voidshell.elf
-
-      # After `make clean` so the dashboard is not wiped before packaging.
-      - name: Build frontend (Preact / Bun)
-        run: |
-          cd ui
-          bun install --frozen-lockfile
-          bun run build
-          test -f ../www/index.html
-          # Sanity: must be the bundled Preact build, not CDN React+Babel
-          ! grep -q 'unpkg.com/react' ../www/index.html
-          ! grep -q '@babel/standalone' ../www/index.html
-          ls -lh ../www/index.html
-
-      - name: Package release assets
-        run: |
-          mkdir -p dist
-          test -f build/voidshell.elf
-          test -f www/index.html
-          cp build/voidshell.elf dist/voidshell.elf
-          cp www/index.html dist/index.html
-          (
-            cd dist
-            sha256sum voidshell.elf index.html > SHA256SUMS
-          )
-          cat dist/SHA256SUMS
+          docker buildx build --output type=local,dest=dist .
           ls -lh dist/
+          cat dist/SHA256SUMS
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
@@ -100,5 +48,12 @@ jobs:
             dist/SHA256SUMS
           generate_release_notes: true
           fail_on_unmatched_files: true
+          body: |
+            Fork build of [amilarajans/voidshell](https://github.com/amilarajans/voidshell) v1.1.1.
+
+            The only change is a fix for the payload not loading on firmware that does not export
+            `sceAppInstUtilAppInstallTitleDir` (observed on 13.40): the symbol is now resolved at runtime.
+            See upstream PR [#2](https://github.com/amilarajans/voidshell/pull/2). Built reproducibly with
+            the Dockerfile (ps5-payload-sdk v0.45). No support promise; prefer upstream once it ships the fix.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

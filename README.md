@@ -1,5 +1,12 @@
 # VoidShell
 
+> **Fork note (nefarius/voidshell).** This fork only adds a fix for VoidShell not loading on firmware that does not
+> export `sceAppInstUtilAppInstallTitleDir` (seen on 13.40; upstream PR
+> [#2](https://github.com/amilarajans/voidshell/pull/2)), plus a pinned `Dockerfile`. Releases are tagged
+> `v<upstream>-nefarius.N`. Build it yourself with `docker build --output dist .` (outputs `voidshell.elf`,
+> `index.html`, `SHA256SUMS`). No support promise; use upstream once it carries the fix.
+
+
 **PS5 homebrew management daemon** — runs after jailbreak and exposes a web dashboard for library management, PKG installs, payload injection, disk-image mounts, fan control, and system monitoring.
 
 [![Build](https://github.com/amilarajans/voidshell/actions/workflows/build-release.yml/badge.svg)](https://github.com/amilarajans/voidshell/actions/workflows/build-release.yml)
