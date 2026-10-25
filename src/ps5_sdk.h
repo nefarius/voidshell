@@ -95,14 +95,12 @@ int sceAppInstUtilInstallByPackage(const void *install_params,
 /** Terminate the AppInstUtil subsystem. */
 int sceAppInstUtilTerminate(void);
 
-/**
- * Register a title directory for the app installer.
- * @param title_id    Title ID string.
- * @param base_path   Base install path (e.g. "/user/app/").
- * @param flags       Reserved, pass 0.
+/*
+ * sceAppInstUtilAppInstallTitleDir is intentionally NOT declared here: newer
+ * firmware (observed on 13.40) no longer exports it from libSceAppInstUtil, and a
+ * static import makes the loader abort with "Unable to resolve" before main().
+ * install.c resolves it at runtime via sceKernelDlsym instead.
  */
-int sceAppInstUtilAppInstallTitleDir(const char *title_id, const char *base_path,
-                                      int flags);
 
 /* ============================================================
  * libSceSysmodule — module management

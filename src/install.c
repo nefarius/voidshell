@@ -22,6 +22,33 @@ char user_tables[10][0x100];
 
 void pkg_log(const char *fmt, ...); /* defined in webserver.c */
 
+/* ---- app_install_title_dir ----
+ * sceAppInstUtilAppInstallTitleDir is resolved lazily: some firmware (e.g. 13.40)
+ * does not export it, and importing it statically would stop the whole payload
+ * from loading. When unavailable we return 0 so the install flow carries on
+ * without the explicit registration call. */
+typedef int (*install_title_dir_fn)(const char *, const char *, int);
+
+static int app_install_title_dir(const char *tid, const char *base)
+{
+    static install_title_dir_fn fn = NULL;
+    static int tried = 0;
+
+    if (!tried) {
+        int h = sceKernelLoadStartModule(
+                    "/system/common/lib/libSceAppInstUtil.sprx",
+                    0, NULL, 0, NULL, NULL);
+        void *sym = NULL;
+        if (h > 0 &&
+            sceKernelDlsym(h, "sceAppInstUtilAppInstallTitleDir", &sym) == 0 && sym)
+            fn = (install_title_dir_fn)sym;
+        else
+            pkg_log("sceAppInstUtilAppInstallTitleDir unavailable on this firmware; skipping");
+        tried = 1;
+    }
+    return fn ? fn(tid, base, 0) : 0;
+}
+
 #ifndef MNT_NULLFS
 #define MNT_NULLFS 1
 #endif
@@ -245,7 +272,7 @@ void mount_and_install(const char *src_path, const char *tid,
         mkdir(ua,0777); mkdir(sd,0777);
         copy_dir(ss,sd); copy_file(is,id2);
         copy_assets_to_appmeta(ss,tid);
-        rc=sceAppInstUtilAppInstallTitleDir(tid,"/user/app/",0);
+        rc=app_install_title_dir(tid,"/user/app/");
         sceKernelUsleep(200000);
         if (rc!=0 && rc!=(int)0x80870002) return;
         notify_system("Installed: %s",display_name);
