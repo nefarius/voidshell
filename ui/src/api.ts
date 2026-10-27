@@ -7,6 +7,8 @@ export interface Stats {
   cpu: number;
   soc: number;
   active_game: string;
+  /** Running big app regardless of focus; empty when nothing runs. Absent on upstream VoidShell. */
+  running_app?: string;
   fan_active: boolean;
   total: number;
   ps5: number;
