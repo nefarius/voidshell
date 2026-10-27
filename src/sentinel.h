@@ -3,6 +3,7 @@
 #define SENTINEL_H
 
 #include <stdbool.h>
+#include <stddef.h>
 
 /* Thread entry points */
 void *thread_sentinel_logic(void *arg);
@@ -20,6 +21,13 @@ bool is_sentinel_whitelisted(const char *title_id);
  * Returns true if the full delay elapsed, false if interrupted.
  */
 bool smart_wait(int delay_ms);
+
+/*
+ * get_running_app_title() -- title ID of the running "big app" (the one game/app the console
+ * runs, whatever has focus). Copies it into `out` and returns 1; returns 0 when nothing runs or
+ * the system functions cannot be resolved on this firmware.
+ */
+int get_running_app_title(char *out, size_t size);
 
 /* Check / update the currently running foreground app */
 void check_running_app_state(void);

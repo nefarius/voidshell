@@ -62,11 +62,11 @@ int sceKernelSuspend(int flags);
 int sceSystemServiceLaunchApp(const char *title_id, const char **argv,
                                const void *launch_params);
 
-/** Get the app-id (handle) of the currently running "big app" (foreground game). */
-int sceSystemServiceGetAppIdOfRunningBigApp(void);
-
-/** Get the title ID string from an app-id. */
-int sceSystemServiceGetAppTitleId(int app_id, char *title_id_out, size_t size);
+/*
+ * sceSystemServiceGetAppIdOfRunningBigApp / sceSystemServiceGetAppTitleId are NOT declared here:
+ * the SDK does not link them reliably, so sentinel.c resolves them at runtime via sceKernelDlsym
+ * (see get_running_app_title()).
+ */
 
 /* ============================================================
  * libSceUserService — user account

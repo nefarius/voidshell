@@ -91,6 +91,73 @@ bool is_sentinel_whitelisted(const char *title_id)
 }
 
 /* ============================================================
+ * get_running_app_title
+ * ============================================================
+ * The system functions are resolved lazily with sceKernelDlsym (like
+ * app_install_title_dir in install.c): a static import would stop the whole payload from
+ * loading on firmware that does not export them. The title lookup tries
+ * sceSystemServiceGetAppTitleId first, then sceLncUtilGetAppTitleId.
+ */
+typedef int (*get_app_id_fn)(void);
+typedef int (*get_title_fn)(int, char *, size_t);
+typedef int (*lnc_title_fn)(int, char *);
+
+int get_running_app_title(char *out, size_t size)
+{
+    static get_app_id_fn get_id    = NULL;
+    static get_title_fn  get_title = NULL;
+    static lnc_title_fn  lnc_title = NULL;
+    static int           tried     = 0;
+    int  app_id;
+    char buf[0x20];
+
+    if (!out || size == 0) return 0;
+    out[0] = '\0';
+
+    if (!tried) {
+        void *sym = NULL;
+        int h = sceKernelLoadStartModule(
+                    "/system/common/lib/libSceSystemService.sprx",
+                    0, NULL, 0, NULL, NULL);
+        if (h > 0 && sceKernelDlsym(h, "sceSystemServiceGetAppIdOfRunningBigApp", &sym) == 0 && sym)
+            get_id = (get_app_id_fn)sym;
+        sym = NULL;
+        if (h > 0 && sceKernelDlsym(h, "sceSystemServiceGetAppTitleId", &sym) == 0 && sym)
+            get_title = (get_title_fn)sym;
+
+        if (!get_title) {
+            int hl = sceKernelLoadStartModule(
+                         "/system/common/lib/libSceLncUtil.sprx",
+                         0, NULL, 0, NULL, NULL);
+            sym = NULL;
+            if (hl > 0 && sceKernelDlsym(hl, "sceLncUtilGetAppTitleId", &sym) == 0 && sym)
+                lnc_title = (lnc_title_fn)sym;
+        }
+
+        log_debug("RUNNING_APP: get_app_id=%s title_id=%s lnc_title_id=%s",
+                  get_id ? "ok" : "missing", get_title ? "ok" : "missing",
+                  lnc_title ? "ok" : "missing");
+        tried = 1;
+    }
+
+    if (!get_id || (!get_title && !lnc_title)) return 0;
+
+    app_id = get_id();
+    if (app_id <= 0) return 0;
+
+    memset(buf, 0, sizeof(buf));
+    if ((get_title ? get_title(app_id, buf, sizeof(buf) - 1)
+                   : lnc_title(app_id, buf)) != 0)
+        return 0;
+    buf[sizeof(buf) - 1] = '\0';
+    if (buf[0] == '\0') return 0;
+
+    strncpy(out, buf, size - 1);
+    out[size - 1] = '\0';
+    return 1;
+}
+
+/* ============================================================
  * check_running_app_state  (addr 0x102890)
  * ============================================================
  * Called from the stats monitor thread on first tick.
@@ -98,7 +165,6 @@ bool is_sentinel_whitelisted(const char *title_id)
  */
 void check_running_app_state(void)
 {
-    int  app_id;
     char title_id[0x20];
     size_t len;
 
@@ -111,11 +177,8 @@ void check_running_app_state(void)
     }
     pthread_mutex_unlock(&g_sentinel_mutex);
 
-    app_id = sceSystemServiceGetAppIdOfRunningBigApp();
-    if (app_id <= 0) return;
-
     memset(title_id, 0, sizeof(title_id));
-    sceSystemServiceGetAppTitleId(app_id, title_id, sizeof(title_id));
+    if (!get_running_app_title(title_id, sizeof(title_id))) return;
 
     len = strlen(title_id);
     if (len <= 8) return;
@@ -265,11 +328,11 @@ void *thread_klog_monitor(void *arg)
                                 g_s_current_state = STATE_MENU;
                                 pthread_mutex_unlock(&g_sentinel_mutex);
                             } else {
-                                /* Extract title ID (8+ alphanumeric chars) */
+                                /* Extract the full title ID (9 chars, e.g. PPSA99575) */
                                 char new_id[0x10] = {0};
                                 size_t j = 0;
                                 char c = app_line[0];
-                                while (j < 8 && c != '\0' && isalnum((unsigned char)c)) {
+                                while (j < 9 && c != '\0' && isalnum((unsigned char)c)) {
                                     new_id[j++] = c;
                                     c = app_line[j];
                                 }
@@ -400,11 +463,9 @@ void *thread_sentinel_logic(void *arg)
                 app_close_counter++;
             } else {
                 /* Verify the big app is still the same game */
-                int  check_id = sceSystemServiceGetAppIdOfRunningBigApp();
                 char check_tid[0x20] = {0};
                 app_close_counter = 0;
-                if (check_id > 0) {
-                    sceSystemServiceGetAppTitleId(check_id, check_tid, sizeof(check_tid));
+                if (get_running_app_title(check_tid, sizeof(check_tid))) {
                     if (strncmp(check_tid, cur_id, 9) != 0) {
                         log_debug("SENTINEL: App Close Detected (%s). Resetting ID.", cur_id);
                         pthread_mutex_lock(&g_sentinel_mutex);
