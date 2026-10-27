@@ -25,7 +25,7 @@ bool smart_wait(int delay_ms);
 /*
  * get_running_app_title() -- title ID of the running "big app" (the one game/app the console
  * runs, whatever has focus). Copies it into `out` and returns 1; returns 0 when nothing runs or
- * the system functions cannot be resolved on this firmware.
+ * the lookup fails.
  */
 int get_running_app_title(char *out, size_t size);
 

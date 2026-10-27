@@ -93,64 +93,32 @@ bool is_sentinel_whitelisted(const char *title_id)
 /* ============================================================
  * get_running_app_title
  * ============================================================
- * The system functions are resolved lazily with sceKernelDlsym (like
- * app_install_title_dir in install.c): a static import would stop the whole payload from
- * loading on firmware that does not export them. The title lookup tries
- * sceSystemServiceGetAppTitleId first, then sceLncUtilGetAppTitleId.
+ * Title ID of the running "big app" (the single game/app the console runs, whatever has
+ * focus). The system functions are linked from libSceSystemService by the SDK (NID import);
+ * sceKernelDlsym by plain name does not find them (ESRCH on firmware 13.40).
  */
-typedef int (*get_app_id_fn)(void);
-typedef int (*get_title_fn)(int, char *, size_t);
-typedef int (*lnc_title_fn)(int, char *);
-
 int get_running_app_title(char *out, size_t size)
 {
-    static get_app_id_fn get_id    = NULL;
-    static get_title_fn  get_title = NULL;
-    static lnc_title_fn  lnc_title = NULL;
-    static int           tried     = 0;
+    static int logged = 0;
     int  app_id;
+    int  rc;
     char buf[0x20];
 
     if (!out || size == 0) return 0;
     out[0] = '\0';
 
-    if (!tried) {
-        void *sym = NULL;
-        int h = sceKernelLoadStartModule(
-                    "/system/common/lib/libSceSystemService.sprx",
-                    0, NULL, 0, NULL, NULL);
-        if (h > 0 && sceKernelDlsym(h, "sceSystemServiceGetAppIdOfRunningBigApp", &sym) == 0 && sym)
-            get_id = (get_app_id_fn)sym;
-        sym = NULL;
-        if (h > 0 && sceKernelDlsym(h, "sceSystemServiceGetAppTitleId", &sym) == 0 && sym)
-            get_title = (get_title_fn)sym;
-
-        if (!get_title) {
-            int hl = sceKernelLoadStartModule(
-                         "/system/common/lib/libSceLncUtil.sprx",
-                         0, NULL, 0, NULL, NULL);
-            sym = NULL;
-            if (hl > 0 && sceKernelDlsym(hl, "sceLncUtilGetAppTitleId", &sym) == 0 && sym)
-                lnc_title = (lnc_title_fn)sym;
-        }
-
-        log_debug("RUNNING_APP: get_app_id=%s title_id=%s lnc_title_id=%s",
-                  get_id ? "ok" : "missing", get_title ? "ok" : "missing",
-                  lnc_title ? "ok" : "missing");
-        tried = 1;
+    app_id = sceSystemServiceGetAppIdOfRunningBigApp();
+    if (app_id <= 0) {
+        if (!logged) { log_debug("RUNNING_APP: no big app (id=0x%x)", app_id); logged = 1; }
+        return 0;
     }
 
-    if (!get_id || (!get_title && !lnc_title)) return 0;
-
-    app_id = get_id();
-    if (app_id <= 0) return 0;
-
     memset(buf, 0, sizeof(buf));
-    if ((get_title ? get_title(app_id, buf, sizeof(buf) - 1)
-                   : lnc_title(app_id, buf)) != 0)
+    rc = sceSystemServiceGetAppTitleId(app_id, buf, sizeof(buf) - 1);
+    if (rc != 0 || buf[0] == '\0') {
+        log_debug("RUNNING_APP: title lookup for app %d failed (rc=0x%x)", app_id, rc);
         return 0;
-    buf[sizeof(buf) - 1] = '\0';
-    if (buf[0] == '\0') return 0;
+    }
 
     strncpy(out, buf, size - 1);
     out[size - 1] = '\0';
