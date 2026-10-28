@@ -516,7 +516,11 @@ class MockHandler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/kill":
-            # Mirrors the C handler: strict decimal (optional sign, padding allowed), then 1 < pid <= INT_MAX.
+            # Mirrors the C handler: marker header first, then strict decimal (optional sign, padding allowed;
+            # an embedded NUL is invalid), then 1 < pid <= INT_MAX.
+            if self.headers.get("X-VoidShell-Request") != "1":
+                self._json({"status": "error", "error": "forbidden"})
+                return
             text = body.decode("ascii", errors="replace").strip()
             pid = int(text) if re.fullmatch(r"[+-]?[0-9]+", text) else None
             if pid is None or pid <= 1 or pid > 2**31 - 1:
@@ -632,9 +636,9 @@ def http_get(path: str, port: int = MOCK_PORT):
     with urllib.request.urlopen(req, timeout=5) as r:
         return r.status, dict(r.headers), r.read()
 
-def http_post(path: str, body: bytes = b"", port: int = MOCK_PORT):
+def http_post(path: str, body: bytes = b"", port: int = MOCK_PORT, headers: dict | None = None):
     url = f"http://127.0.0.1:{port}{path}"
-    req = urllib.request.Request(url, data=body, method="POST")
+    req = urllib.request.Request(url, data=body, method="POST", headers=headers or {})
     try:
         with urllib.request.urlopen(req, timeout=5) as r:
             return r.status, dict(r.headers), r.read()
@@ -738,15 +742,19 @@ def test_protocol(rest_port: int = MOCK_PORT, pkg_port: int = PKG_MOCK_PORT) -> 
         check("API   GET /api/processes lists pid + name",
               s == 200 and all("pid" in p and "name" in p for p in data["processes"]))
         s, _, b = http_post("/api/kill", b"1", rest_port)
-        for bad in (b"1", b"0", b"-5", b"12abc", b"", b"2147483648"):
-            s, _, b = http_post("/api/kill", bad, rest_port)
+        marker = {"X-VoidShell-Request": "1"}
+        s, _, b = http_post("/api/kill", b"1234", rest_port)
+        check("API   POST /api/kill without the marker header is forbidden",
+              json.loads(b) == {"status": "error", "error": "forbidden"})
+        for bad in (b"1", b"0", b"-5", b"12abc", b"", b"2147483648", b"12\x00abc"):
+            s, _, b = http_post("/api/kill", bad, rest_port, marker)
             check(f"API   POST /api/kill rejects {bad!r} as bad request",
                   json.loads(b) == {"status": "error", "error": "bad request"})
-        s, _, b = http_post("/api/kill", b"1300", rest_port)
+        s, _, b = http_post("/api/kill", b"1300", rest_port, marker)
         check("API   POST /api/kill refuses SceShellUI", json.loads(b).get("error") == "refused")
-        s, _, b = http_post("/api/kill", b"1234", rest_port)
+        s, _, b = http_post("/api/kill", b"1234", rest_port, marker)
         check("API   POST /api/kill accepts a listed pid", json.loads(b).get("status") == "ok")
-        s, _, b = http_post("/api/kill", b"+01234", rest_port)
+        s, _, b = http_post("/api/kill", b"+01234", rest_port, marker)
         check("API   POST /api/kill accepts a signed, zero-padded pid", json.loads(b).get("status") == "ok")
     except Exception as exc:
         check("API   process API", False, str(exc))

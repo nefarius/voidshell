@@ -258,6 +258,29 @@ static const char *read_small_body(int sock, char *request, unsigned int *receiv
     }
 }
 
+/*
+ * True when the request headers carry `X-VoidShell-Request: 1`. A browser cannot add that header to a
+ * cross-origin request without a CORS preflight, which this server never approves, so a web page
+ * cannot trigger state-changing calls that require it.
+ */
+static int has_request_marker(const char *request)
+{
+    const char *end = strstr(request, "\r\n\r\n");
+    const char *p;
+
+    if (!end) return 0;
+    for (p = request; p < end; p++) {
+        if (p == request || p[-1] == '\n') {
+            if (strncasecmp(p, "X-VoidShell-Request:", 20) == 0) {
+                p += 20;
+                while (p < end && (*p == ' ' || *p == '\t')) p++;
+                return p < end && *p == '1' && (p + 1 == end || p[1] == '\r' || p[1] == ' ');
+            }
+        }
+    }
+    return 0;
+}
+
 /* ============================================================
  * serve_dashboard  (addr 0x1071d0)
  * ============================================================
@@ -1217,10 +1240,20 @@ void handle_client(int sock)
         char        json[96];
         int         rc = EINVAL;
 
+        if (!has_request_marker(request)) {
+            const char *denied = "{\"status\":\"error\",\"error\":\"forbidden\"}";
+            send_response(sock, "application/json", denied, strlen(denied), 1);
+            goto done;
+        }
+
         body = read_small_body(sock, request, &bytes_recv, 0x40000, &body_len);
         if (body && body_len > 0 && body_len < (long)sizeof(pid_text)) {
             memcpy(pid_text, body, (size_t)body_len);
             pid_text[body_len] = '\0';
+            if (strlen(pid_text) != (size_t)body_len) {
+                /* An embedded NUL would end the number early while Content-Length says more. */
+                body = NULL;
+            }
             errno = 0;
             pid = strtol(pid_text, &end, 10);
             while (end && *end && isspace((unsigned char)*end)) end++;
