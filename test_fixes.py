@@ -315,6 +315,15 @@ def test_static_image_mount() -> None:
     check("IMG  webserver.c includes image_mount.h",                '#include "image_mount.h"' in ws)
     check("IMG  webserver.c has GET /api/images route",             "/api/images" in ws and "image_mount_list_json" in ws)
     check("IMG  webserver.c has POST /api/images/unmount route",    "/api/images/unmount" in ws and "image_mount_unmount_by_path" in ws)
+    # Each route block (up to the next "/* ---- API" marker) has to call its helper, not merely mention it.
+    check("API  webserver.c reports VOIDSHELL_SEMVER in GET /api/version",
+          re.search(r'GET /api/version.*?VOIDSHELL_SEMVER', ws, re.S) is not None and "VOIDSHELL_SEMVER" in slurp(ROOT / "src" / "types.h"))
+    check("API  webserver.c GET /api/processes route calls list_processes()",
+          re.search(r'strncmp\(request, "GET /api/processes".*?list_processes\(', ws, re.S) is not None
+          and "/* ---- API" not in re.search(r'strncmp\(request, "GET /api/processes".*?list_processes\(', ws, re.S).group(0)[1:])
+    check("API  webserver.c POST /api/kill route calls kill_process()",
+          re.search(r'strncmp\(request, "POST /api/kill".*?kill_process\(', ws, re.S) is not None
+          and "/* ---- API" not in re.search(r'strncmp\(request, "POST /api/kill".*?kill_process\(', ws, re.S).group(0)[1:])
 
     # --- Makefile ---
     mk = slurp(ROOT / "Makefile")
@@ -455,7 +464,11 @@ class MockHandler(BaseHTTPRequestHandler):
             "/api/session": lambda: self._json({
                 "count": 1, "installed": ["PPSA01234"],
             }),
-            "/api/version": lambda: self._json({"version": "V1.1"}),
+            "/api/version": lambda: self._json({"version": "V1.1", "semver": "1.1.1-nefarius.4"}),
+            "/api/processes": lambda: self._json({"processes": [
+                {"pid": 1234, "name": "pldmgr_v0.6.3.el"},
+                {"pid": 1300, "name": "SceShellUI"},
+            ]}),
             "/api/config_raw": lambda: self._send(200, "text/plain", (
                 "[Settings]\n"
                 "ScanInterval=5\n"
@@ -502,6 +515,24 @@ class MockHandler(BaseHTTPRequestHandler):
         if path == "/api/notify":
             msg = body.decode("utf-8", errors="replace").strip()
             self._json({"status": "ok", "message": msg})
+            return
+
+        if path == "/api/kill":
+            # Mirrors the C handler: marker header first, then strict decimal (optional sign, padding allowed;
+            # an embedded NUL is invalid), then 1 < pid <= INT_MAX.
+            if self.headers.get("X-VoidShell-Request") != "1":
+                self._json({"status": "error", "error": "forbidden"})
+                return
+            text = body.decode("ascii", errors="replace").strip()
+            pid = int(text) if re.fullmatch(r"[+-]?[0-9]+", text) else None
+            if pid is None or pid <= 1 or pid > 2**31 - 1:
+                self._json({"status": "error", "error": "bad request"})
+            elif pid == 1234:
+                self._json({"status": "ok"})
+            elif pid == 1300:
+                self._json({"status": "error", "error": "refused"})
+            else:
+                self._json({"status": "error", "error": "no such process"})
             return
 
         if path == "/api/images/unmount":
@@ -607,9 +638,9 @@ def http_get(path: str, port: int = MOCK_PORT):
     with urllib.request.urlopen(req, timeout=5) as r:
         return r.status, dict(r.headers), r.read()
 
-def http_post(path: str, body: bytes = b"", port: int = MOCK_PORT):
+def http_post(path: str, body: bytes = b"", port: int = MOCK_PORT, headers: dict | None = None):
     url = f"http://127.0.0.1:{port}{path}"
-    req = urllib.request.Request(url, data=body, method="POST")
+    req = urllib.request.Request(url, data=body, method="POST", headers=headers or {})
     try:
         with urllib.request.urlopen(req, timeout=5) as r:
             return r.status, dict(r.headers), r.read()
@@ -705,6 +736,40 @@ def test_protocol(rest_port: int = MOCK_PORT, pkg_port: int = PKG_MOCK_PORT) -> 
               data.get("status") == "error")
     except Exception as exc:
         check("IMG  POST /api/images/unmount (unknown path)", False, str(exc))
+
+    # Process API
+    try:
+        s, _, b = http_get("/api/processes", rest_port)
+        data = json.loads(b)
+        check("API   GET /api/processes lists pid + name",
+              s == 200 and all("pid" in p and "name" in p for p in data["processes"]))
+        s, _, b = http_post("/api/kill", b"1", rest_port)
+        marker = {"X-VoidShell-Request": "1"}
+        s, _, b = http_post("/api/kill", b"1234", rest_port)
+        check("API   POST /api/kill without the marker header is forbidden",
+              json.loads(b) == {"status": "error", "error": "forbidden"})
+        for bad in (b"1", b"0", b"-5", b"12abc", b"", b"2147483648", b"12\x00abc"):
+            s, _, b = http_post("/api/kill", bad, rest_port, marker)
+            check(f"API   POST /api/kill rejects {bad!r} as bad request",
+                  json.loads(b) == {"status": "error", "error": "bad request"})
+        s, _, b = http_post("/api/kill", b"1300", rest_port, marker)
+        check("API   POST /api/kill refuses SceShellUI", json.loads(b).get("error") == "refused")
+        s, _, b = http_post("/api/kill", b"1234", rest_port, marker)
+        check("API   POST /api/kill accepts a listed pid", json.loads(b).get("status") == "ok")
+        s, _, b = http_post("/api/kill", b"+01234", rest_port, marker)
+        check("API   POST /api/kill accepts a signed, zero-padded pid", json.loads(b).get("status") == "ok")
+    except Exception as exc:
+        check("API   process API", False, str(exc))
+
+    # Version keeps the upstream value and adds the fork's SemVer
+    try:
+        s, _, b = http_get("/api/version", rest_port)
+        data = json.loads(b)
+        check("API   /api/version keeps 'version' V1.1 and adds a SemVer 'semver'",
+              data.get("version") == "V1.1"
+              and re.fullmatch(r"\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?", str(data.get("semver", ""))) is not None)
+    except Exception as exc:
+        check("API   /api/version", False, str(exc))
 
     # Stats endpoint includes new fields
     try:

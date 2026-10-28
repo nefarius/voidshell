@@ -46,6 +46,7 @@
 #include <pthread.h>
 #include <sys/sysctl.h>
 #include <signal.h>
+#include <errno.h>
 
 /* Sentinel state constants */
 #define STATE_GAME  0x454d4147  /* "GAME" */
@@ -557,12 +558,13 @@ update_prev:
  * Finds the SceShellUI process via sysctl kern.proc.all and sends
  * SIGKILL to restart the shell (equivalent to a system "respring").
  */
-void respring_shell(void)
+int list_processes(process_cb cb, void *ctx)
 {
     int     mib[4];
     size_t  buf_len = 0;
     char   *buf;
     char   *p;
+    int     count = 0;
 
     /* sysctl kern.proc.all: mib = {1, 14, 0, 0} */
     /* The binary uses mib {0x1, 0x15, 0x1500000001} which resolves to
@@ -575,12 +577,15 @@ void respring_shell(void)
     mib[3] = 0;
 
     /* First call: get size */
-    sysctl(mib, 4, NULL, &buf_len, NULL, 0);
+    if (sysctl(mib, 4, NULL, &buf_len, NULL, 0) != 0 || buf_len == 0) return -1;
 
     buf = malloc(buf_len);
-    if (!buf) return;
+    if (!buf) return -1;
 
-    sysctl(mib, 4, buf, &buf_len, NULL, 0);
+    if (sysctl(mib, 4, buf, &buf_len, NULL, 0) != 0) {
+        free(buf);
+        return -1;
+    }
 
     /* Walk kinfo_proc entries */
     p = buf;
@@ -588,18 +593,66 @@ void respring_shell(void)
         int entry_size = *(int *)p;
         if (entry_size < 1) break;
 
-        /* Process name is at offset 0x1BF (from decompile: (char*)entry + 0x1bf) */
-        char *pname = p + 0x1bf;
+        /* Process name is at offset 0x1BF (from decompile: (char*)entry + 0x1bf), at most 19 chars */
+        char pname[20];
+        memcpy(pname, p + 0x1bf, sizeof(pname) - 1);
+        pname[sizeof(pname) - 1] = '\0';
 
-        if (strcmp(pname, "SceShellUI") == 0) {
-            /* PID is at offset 0x48 in kinfo_proc (p->ki_pid) */
-            int pid = *(int *)(p + 0x48);
-            kill(pid, SIGKILL);
-            break;
-        }
+        /* PID is at offset 0x48 in kinfo_proc (p->ki_pid) */
+        int pid = *(int *)(p + 0x48);
+        count++;
+        if (cb(pid, pname, ctx)) break;
         p += entry_size;
     }
     free(buf);
+    return count;
+}
+
+static int respring_cb(int pid, const char *name, void *ctx)
+{
+    (void)ctx;
+    if (strcmp(name, "SceShellUI") == 0) {
+        kill(pid, SIGKILL);
+        return 1;
+    }
+    return 0;
+}
+
+void respring_shell(void)
+{
+    list_processes(respring_cb, NULL);
+}
+
+/* ============================================================
+ * kill_process
+ * ============================================================
+ * SIGKILL one process by pid. Refuses pid <= 1, VoidShell itself and
+ * SceShellUI (use respring_shell for that one). Returns 0 or an errno value.
+ */
+struct kill_guard {
+    int pid;
+    int found;
+    int is_shell;
+};
+
+static int kill_guard_cb(int pid, const char *name, void *ctx)
+{
+    struct kill_guard *g = ctx;
+    if (pid != g->pid) return 0;
+    g->found = 1;
+    g->is_shell = strcmp(name, "SceShellUI") == 0;
+    return 1;
+}
+
+int kill_process(int pid)
+{
+    struct kill_guard g = { pid, 0, 0 };
+
+    if (pid <= 1 || pid == (int)getpid()) return EPERM;
+    if (list_processes(kill_guard_cb, &g) < 0) return EIO;
+    if (!g.found) return ESRCH;
+    if (g.is_shell) return EPERM;
+    return kill(pid, SIGKILL) == 0 ? 0 : errno;
 }
 
 /* ============================================================

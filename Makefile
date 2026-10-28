@@ -5,7 +5,10 @@ SRCDIR   := src
 BUILDDIR := build
 
 # Flags
-CFLAGS  := -O2 -Wall -Wno-unused-function -D_BSD_SOURCE -std=gnu11 \
+# Release builds pass VOIDSHELL_SEMVER (for example 1.1.1-nefarius.4, from the tag); empty keeps the default in types.h.
+SEMVER_FLAG := $(if $(VOIDSHELL_SEMVER),-DVOIDSHELL_SEMVER='"$(VOIDSHELL_SEMVER)"')
+
+CFLAGS  := $(SEMVER_FLAG) -O2 -Wall -Wno-unused-function -D_BSD_SOURCE -std=gnu11 \
            -ffunction-sections -fdata-sections \
            -I$(SRCDIR) $(if $(INCDIR),-I$(INCDIR)) -DSQLITE_THREADSAFE=1
 

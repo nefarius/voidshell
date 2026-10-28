@@ -14,6 +14,8 @@
  *   GET  /api/logs/clear   -> truncate debug.log
  *   POST /api/logs/clear   -> truncate debug.log
  *   POST /api/send_payload -> send ELF payload to 127.0.0.1:15651
+ *   GET  /api/processes    -> JSON: running processes (pid, name)
+ *   POST /api/kill         -> SIGKILL the process whose pid is the body
  *   POST /api/launch       -> set g_cmd_launch_id
  *   POST /api/rescan       -> set g_cmd_rescan
  *   POST /api/pause        -> toggle g_paused
@@ -62,6 +64,8 @@
 #include <stdarg.h>
 #include <ctype.h>
 #include <stdbool.h>
+#include <errno.h>
+#include <limits.h>
 
 /* ============================================================
  * Global PKG server state
@@ -187,6 +191,147 @@ void send_response(int sock, const char *content_type, const char *body,
 
     send(sock, header, strlen(header), 0);
     send(sock, body,   body_len,       0);
+}
+
+/* Builds the /api/processes array; names are reduced to printable ASCII with " and \ escaped. */
+struct proc_json {
+    char *buf;
+    int   pos;
+    int   cap;
+    int   count;
+};
+
+static int proc_json_cb(int pid, const char *name, void *ctx)
+{
+    struct proc_json *pj = ctx;
+    char esc[48];
+    int  n = 0;
+
+    for (; *name && n < (int)sizeof(esc) - 2; name++) {
+        unsigned char c = (unsigned char)*name;
+        if (c < 0x20 || c > 0x7e) continue;
+        if (c == '"' || c == '\\') esc[n++] = '\\';
+        esc[n++] = (char)c;
+    }
+    esc[n] = '\0';
+
+    if (pj->cap - pj->pos < 128) return 1; /* keep room for the closing brackets */
+    pj->pos += snprintf(pj->buf + pj->pos, pj->cap - pj->pos,
+                        "%s{\"pid\":%d,\"name\":\"%s\"}", pj->count ? "," : "", pid, esc);
+    pj->count++;
+    return 0;
+}
+
+/*
+ * Completes a small POST in `request` (capacity `cap`, `*received` bytes so far): keeps reading until the
+ * declared Content-Length (required, at most 64) is present. Returns the body start and sets *body_len,
+ * or NULL when the length is missing, too large, or the connection ends first.
+ */
+#define SMALL_BODY_DEADLINE_MS 5000
+
+/* Milliseconds left until `deadline` (CLOCK_MONOTONIC, in ms); 0 when it has passed. */
+static long ms_until(long long deadline)
+{
+    struct timespec now;
+    long long       left;
+
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    left = deadline - ((long long)now.tv_sec * 1000 + now.tv_nsec / 1000000);
+    return left > 0 ? (long)left : 0;
+}
+
+/*
+ * Strict Content-Length value: optional blanks, decimal digits only, optional blanks, then the end of the
+ * header line. Returns -1 for anything else (so "5abc" or "-1" is not read as 5 or accepted).
+ */
+static long parse_content_length(const char *value, const char *line_end)
+{
+    long len = 0;
+    int  digits = 0;
+
+    while (value < line_end && (*value == ' ' || *value == '\t')) value++;
+    while (value < line_end && *value >= '0' && *value <= '9') {
+        len = len * 10 + (*value - '0');
+        if (len > 1000000) return -1;
+        value++;
+        digits++;
+    }
+    while (value < line_end && (*value == ' ' || *value == '\t')) value++;
+    return (digits > 0 && value == line_end) ? len : -1;
+}
+
+static const char *read_small_body(int sock, char *request, unsigned int *received, size_t cap, long *body_len)
+{
+    struct timespec start;
+    long long       deadline;
+
+    /* One fixed deadline for the whole request: a client that trickles bytes does not get more time. */
+    clock_gettime(CLOCK_MONOTONIC, &start);
+    deadline = (long long)start.tv_sec * 1000 + start.tv_nsec / 1000000 + SMALL_BODY_DEADLINE_MS;
+
+    for (;;) {
+        char *sep = strstr(request, "\r\n\r\n");
+        if (sep) {
+            long  len = -1;
+            char *p;
+
+            for (p = request; p < sep; p++) {
+                if ((p == request || p[-1] == '\n') && strncasecmp(p, "Content-Length:", 15) == 0) {
+                    char *eol = strstr(p, "\r\n");
+                    len = parse_content_length(p + 15, eol ? eol : sep);
+                    break;
+                }
+            }
+            if (len < 0 || len > 64) return NULL;
+            if (*received >= (unsigned int)((sep + 4 - request) + len)) {
+                *body_len = len;
+                return sep + 4;
+            }
+        }
+
+        if (*received >= cap - 1) return NULL;
+        {
+            long           left = ms_until(deadline);
+            fd_set         rfds;
+            struct timeval tv;
+            int            n;
+
+            if (left <= 0) return NULL;
+            FD_ZERO(&rfds);
+            FD_SET(sock, &rfds);
+            tv.tv_sec  = left / 1000;
+            tv.tv_usec = (left % 1000) * 1000;
+            if (select(sock + 1, &rfds, NULL, NULL, &tv) <= 0) return NULL;
+
+            n = recv(sock, request + *received, cap - 1 - *received, 0);
+            if (n < 1) return NULL;
+            *received += (unsigned int)n;
+            request[*received] = '\0';
+        }
+    }
+}
+
+/*
+ * True when the request headers carry `X-VoidShell-Request: 1`. A browser cannot add that header to a
+ * cross-origin request without a CORS preflight, which this server never approves, so a web page
+ * cannot trigger state-changing calls that require it.
+ */
+static int has_request_marker(const char *request)
+{
+    const char *end = strstr(request, "\r\n\r\n");
+    const char *p;
+
+    if (!end) return 0;
+    for (p = request; p < end; p++) {
+        if (p == request || p[-1] == '\n') {
+            if (strncasecmp(p, "X-VoidShell-Request:", 20) == 0) {
+                p += 20;
+                while (p < end && (*p == ' ' || *p == '\t')) p++;
+                return p < end && *p == '1' && (p + 1 == end || p[1] == '\r' || p[1] == ' ');
+            }
+        }
+    }
+    return 0;
 }
 
 /* ============================================================
@@ -1120,10 +1265,76 @@ void handle_client(int sock)
         goto done;
     }
 
+    /* ---- API: processes ---- */
+    if (strncmp(request, "GET /api/processes", 18) == 0) {
+        struct proc_json pj = { malloc(0x10000), 0, 0x10000, 0 };
+
+        if (!pj.buf) goto done;
+        pj.pos = snprintf(pj.buf, pj.cap, "{\"processes\":[");
+        if (list_processes(proc_json_cb, &pj) < 0) {
+            const char *err = "{\"status\":\"error\",\"error\":\"process list unavailable\"}";
+            send_response(sock, "application/json", err, strlen(err), 1);
+            free(pj.buf);
+            goto done;
+        }
+        pj.pos += snprintf(pj.buf + pj.pos, pj.cap - pj.pos, "]}");
+        send_response(sock, "application/json", pj.buf, pj.pos, 1);
+        free(pj.buf);
+        goto done;
+    }
+
+    /* ---- API: kill ---- */
+    if (strncmp(request, "POST /api/kill", 14) == 0) {
+        const char *body;
+        long        body_len = 0;
+        char        pid_text[16];
+        char       *end = NULL;
+        long        pid = 0;
+        char        json[96];
+        int         rc = EINVAL;
+
+        /* Finish reading the (bounded) headers and body first: the marker may arrive in a later segment. */
+        body = read_small_body(sock, request, &bytes_recv, 0x40000, &body_len);
+        if (!has_request_marker(request)) {
+            const char *denied = "{\"status\":\"error\",\"error\":\"forbidden\"}";
+            send_response(sock, "application/json", denied, strlen(denied), 1);
+            goto done;
+        }
+
+        if (body && body_len > 0 && body_len < (long)sizeof(pid_text)) {
+            memcpy(pid_text, body, (size_t)body_len);
+            pid_text[body_len] = '\0';
+            if (strlen(pid_text) != (size_t)body_len) {
+                /* An embedded NUL would end the number early while Content-Length says more. */
+                body = NULL;
+            }
+            errno = 0;
+            pid = strtol(pid_text, &end, 10);
+            while (end && *end && isspace((unsigned char)*end)) end++;
+            if (errno != 0 || end == pid_text || *end != '\0' || pid <= 1 || pid > INT_MAX) {
+                body = NULL;
+            }
+        } else {
+            body = NULL;
+        }
+
+        if (body) rc = kill_process((int)pid);
+        if (rc == 0) {
+            snprintf(json, sizeof(json), "{\"status\":\"ok\"}");
+        } else if (rc == EINVAL) {
+            snprintf(json, sizeof(json), "{\"status\":\"error\",\"error\":\"bad request\"}");
+        } else {
+            snprintf(json, sizeof(json), "{\"status\":\"error\",\"error\":\"%s\"}",
+                     rc == ESRCH ? "no such process" : rc == EPERM ? "refused" : "failed");
+        }
+        send_response(sock, "application/json", json, strlen(json), 1);
+        goto done;
+    }
+
     /* ---- API: version ---- */
     if (strncmp(request, "GET /api/version", 16) == 0) {
-        char json[64];
-        snprintf(json, sizeof(json), "{\"version\":\"%s\"}", VOIDSHELL_VERSION);
+        char json[128];
+        snprintf(json, sizeof(json), "{\"version\":\"%s\",\"semver\":\"%s\"}", VOIDSHELL_VERSION, VOIDSHELL_SEMVER);
         send_response(sock, "application/json", json, strlen(json), 1);
         goto done;
     }
