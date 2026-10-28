@@ -6,7 +6,7 @@
  *   GET  /index.html     -> serve_dashboard
  *   GET  /assets/icon/:id  -> serve icon0.png from /user/appmeta/<id>/
  *   GET  /assets/pic/:id   -> serve pic0.png  from /user/appmeta/<id>/
- *   GET  /api/stats        -> JSON: cpu/soc temps, uptime, active game, counts
+ *   GET  /api/stats        -> JSON: cpu/soc temps, uptime, active game, running app, counts
  *   GET  /api/library      -> JSON: full installed app library
  *   GET  /api/payloads     -> JSON: .elf/.bin files in /data/voidshell/payloads/
  *   GET  /api/config_raw   -> raw text: /data/voidshell/config.ini
@@ -829,6 +829,9 @@ void handle_client(int sock)
         char  json[1024];
         char  uptime[64];
         char  active_game[0x20];
+        char  running_app[0x20];
+        char  running_json[0x30];
+        int   running_rc;
         char  state_str[8];
         int   cpu, soc;
         const char *paused_str, *fan_str;
@@ -844,20 +847,27 @@ void handle_client(int sock)
         memcpy(state_str, &g_s_current_state, 4); state_str[4] = '\0';
         pthread_mutex_unlock(&g_sentinel_mutex);
 
+        /* The running big app, whatever has focus: "" when nothing runs, null when the lookup failed. */
+        running_rc = get_running_app_title(running_app, sizeof(running_app));
+        if (running_rc < 0)
+            snprintf(running_json, sizeof(running_json), "null");
+        else
+            snprintf(running_json, sizeof(running_json), "\"%s\"", running_rc == 1 ? running_app : "");
+
         paused_str = g_paused    ? "true" : "false";
         fan_str    = g_fan_enabled ? "true" : "false";
 
         snprintf(json, sizeof(json),
                  "{\"total\":%d,\"ps5\":%d,\"ps4\":%d,"
                  "\"cpu\":%d,\"soc\":%d,\"sys_uptime\":\"%s\","
-                 "\"active_game\":\"%s\",\"state\":\"%s\","
+                 "\"active_game\":\"%s\",\"running_app\":%s,\"state\":\"%s\","
                  "\"paused\":%s,\"ip\":\"%s\","
                  "\"fan_active\":%s,\"fan_target\":%d,"
                  "\"session_count\":%d,"
                  "\"version\":\"%s\"}",
                  g_stat_total, g_stat_ps5, g_stat_ps4,
                  cpu, soc, uptime,
-                 active_game, state_str,
+                 active_game, running_json, state_str,
                  paused_str, g_ip_address,
                  fan_str, g_fan_target_temp,
                  g_session_count,

@@ -62,7 +62,7 @@ int sceKernelSuspend(int flags);
 int sceSystemServiceLaunchApp(const char *title_id, const char **argv,
                                const void *launch_params);
 
-/** Get the app-id (handle) of the currently running "big app" (foreground game). */
+/** Get the app-id (handle) of the currently running "big app" (the running game/app). */
 int sceSystemServiceGetAppIdOfRunningBigApp(void);
 
 /** Get the title ID string from an app-id. */

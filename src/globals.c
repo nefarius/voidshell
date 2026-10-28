@@ -75,17 +75,6 @@ char cache[512 * 0x421];
  * ---------------------------------------------------------- */
 uint64_t KERNEL_ADDRESS_DATA_BASE = 0;
 
-/* ----------------------------------------------------------
- * PS5 system service stubs not exported by libSceSystemService
- * in the ps5-payload-sdk. The sentinel uses these to detect the
- * running game; returning -1 causes graceful degradation.
- * ---------------------------------------------------------- */
-__attribute__((weak))
-int sceSystemServiceGetAppIdOfRunningBigApp(void)
-{
-    return -1;
-}
-
 /* ---- image_mount globals ---- */
 image_mount_entry_t image_cache[MAX_IMAGE_MOUNTS];
 bool g_img_mount_ro        = true;
@@ -94,12 +83,3 @@ int  g_img_stability_wait  = 5;
 char g_img_backend[8]      = "lvd";
 int  g_img_scan_paths_count = 0;
 char g_img_scan_paths[16][1024];
-
-__attribute__((weak))
-int sceSystemServiceGetAppTitleId(int app_id, char *title_id_out, size_t size)
-{
-    (void)app_id;
-    if (title_id_out && size > 0)
-        title_id_out[0] = '\0';
-    return -1;
-}

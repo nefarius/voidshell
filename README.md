@@ -229,7 +229,7 @@ Base URL: `http://<ps5-ip>:7007`
 
 | Method | Endpoint | Description |
 |---|---|---|
-| GET | `/api/stats` | Temps, uptime, active game, counts, version |
+| GET | `/api/stats` | Temps, uptime, tracked title (`active_game`, from focus events; it can keep the previous title when focus moves to the home screen or control centre), running title (`running_app`: `""` when nothing runs, `null` when the lookup failed), counts, version |
 | GET | `/api/library` | Installed PS5 + PS4 library |
 | GET | `/api/payloads` | Files in `/data/voidshell/payloads/` |
 | GET | `/api/session` | Titles installed this boot |
