@@ -235,7 +235,7 @@ Base URL: `http://<ps5-ip>:7007`
 | GET | `/api/session` | Titles installed this boot |
 | GET | `/api/version` | `{"version":"V1.1","semver":"1.1.1-nefarius.4"}`. `version` stays `V1.1` for compatibility; `semver` is this fork's full SemVer (from the release tag) and is absent on upstream builds |
 | GET | `/api/processes` | `{"processes":[{"pid":123,"name":"..."}]}`; names are the kernel's 19-character process names |
-| POST | `/api/kill` | Body is a decimal pid; sends SIGKILL. Requires the header `X-VoidShell-Request: 1` (otherwise `"error":"forbidden"`), so a web page cannot trigger it cross-origin. Answers `{"status":"ok"}` or `{"status":"error","error":"forbidden"\|"bad request"\|"refused"\|"no such process"\|"failed"}`; the body must be a whole number matching `Content-Length`. Pids 1 and lower (including 0) are `bad request`; VoidShell itself and SceShellUI are `refused` |
+| POST | `/api/kill` | Body is a decimal pid; sends SIGKILL. Requires the header `X-VoidShell-Request: 1` (otherwise `"error":"forbidden"`), so a web page cannot trigger it cross-origin; this is not authentication, and VoidShell has none, so keep port 7007 on a trusted network. Answers `{"status":"ok"}` or `{"status":"error","error":"forbidden"\|"bad request"\|"refused"\|"no such process"\|"failed"}`; the body must be a whole number matching `Content-Length`. Pids 1 and lower (including 0) are `bad request`; VoidShell itself and SceShellUI are `refused` |
 | GET | `/api/config_raw` | Raw `config.ini` |
 | GET | `/api/logs` | Last ~64 KB of debug log |
 | GET | `/api/images` | Currently mounted images |
