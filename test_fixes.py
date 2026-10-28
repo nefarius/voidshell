@@ -445,7 +445,7 @@ class MockHandler(BaseHTTPRequestHandler):
                 "cpu": 48.3, "soc": 55.7, "sys_uptime": 7200,
                 "active_game": "MENU", "running_app": "", "fan_active": False,
                 "total": len(MOCK_GAMES), "ps5": 2, "ps4": 1,
-                "session_count": 1, "version": "V1.1",
+                "session_count": 1, "version": "V1.1", "firmware": "13.40",
             }),
             "/api/library": lambda: self._json({"games": MOCK_GAMES}),
             "/api/payloads": lambda: self._json({"payloads": [
@@ -713,6 +713,8 @@ def test_protocol(rest_port: int = MOCK_PORT, pkg_port: int = PKG_MOCK_PORT) -> 
         check("API   /api/stats has 'version' field",   "version"       in data)
         check("API   /api/stats has 'session_count'",   "session_count" in data)
         check("API   /api/stats has 'running_app'",    "running_app"   in data)
+        check("API   /api/stats has 'firmware' as NN.NN",
+              re.fullmatch(r"\d{2}\.\d{2}", str(data.get("firmware", ""))) is not None)
     except Exception as exc:
         check("API   /api/stats fields", False, str(exc))
 
