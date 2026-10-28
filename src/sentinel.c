@@ -108,8 +108,10 @@ int get_running_app_title(char *out, size_t size)
     out[0] = '\0';
 
     app_id = sceSystemServiceGetAppIdOfRunningBigApp();
-    if (app_id == 0) return 0;                 /* confirmed: no big app runs */
-    if (app_id < 0) {                          /* lookup failed: state unknown */
+    /* 0 and -1 are the "no big app" answers (-1 seen on firmware 13.40 after the app quit);
+     * any other negative value is a system error code: state unknown. */
+    if (app_id == 0 || app_id == -1) return 0;
+    if (app_id < 0) {
         if (!logged) { log_debug("RUNNING_APP: lookup failed (id=0x%x)", app_id); logged = 1; }
         return -1;
     }
