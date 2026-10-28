@@ -14,6 +14,13 @@
 
 #define VOIDSHELL_VERSION  "V1.1"
 
+/* Full SemVer of this fork build, reported as "semver" by GET /api/version (upstream has no such field,
+ * which is how clients tell the fork apart while "version" stays V1.1). The release build overrides it with
+ * -DVOIDSHELL_SEMVER from the tag (see the Makefile and Dockerfile). */
+#ifndef VOIDSHELL_SEMVER
+#define VOIDSHELL_SEMVER   "1.1.1-nefarius.4"
+#endif
+
 /* ----------------------------------------------------------
  * game_info struct — layout recovered from get_game_info_extended()
  *

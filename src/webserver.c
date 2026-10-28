@@ -1333,8 +1333,8 @@ void handle_client(int sock)
 
     /* ---- API: version ---- */
     if (strncmp(request, "GET /api/version", 16) == 0) {
-        char json[64];
-        snprintf(json, sizeof(json), "{\"version\":\"%s\"}", VOIDSHELL_VERSION);
+        char json[128];
+        snprintf(json, sizeof(json), "{\"version\":\"%s\",\"semver\":\"%s\"}", VOIDSHELL_VERSION, VOIDSHELL_SEMVER);
         send_response(sock, "application/json", json, strlen(json), 1);
         goto done;
     }

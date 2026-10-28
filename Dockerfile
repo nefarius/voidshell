@@ -17,9 +17,10 @@ RUN wget -q -O /tmp/sdk.zip "https://github.com/ps5-payload-dev/sdk/releases/dow
  && rm /tmp/sdk.zip
 ENV PS5_PAYLOAD_SDK=/opt/ps5-payload-sdk
 WORKDIR /src
+ARG VOIDSHELL_SEMVER=
 COPY Makefile ./
 COPY src ./src
-RUN make -j"$(nproc)" && test -f build/voidshell.elf
+RUN make -j"$(nproc)" VOIDSHELL_SEMVER="${VOIDSHELL_SEMVER}" && test -f build/voidshell.elf
 
 FROM oven/bun:${BUN_VERSION} AS ui
 WORKDIR /src/ui

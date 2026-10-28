@@ -316,6 +316,8 @@ def test_static_image_mount() -> None:
     check("IMG  webserver.c has GET /api/images route",             "/api/images" in ws and "image_mount_list_json" in ws)
     check("IMG  webserver.c has POST /api/images/unmount route",    "/api/images/unmount" in ws and "image_mount_unmount_by_path" in ws)
     # Each route block (up to the next "/* ---- API" marker) has to call its helper, not merely mention it.
+    check("API  webserver.c reports VOIDSHELL_SEMVER in GET /api/version",
+          re.search(r'GET /api/version.*?VOIDSHELL_SEMVER', ws, re.S) is not None and "VOIDSHELL_SEMVER" in slurp(ROOT / "src" / "types.h"))
     check("API  webserver.c GET /api/processes route calls list_processes()",
           re.search(r'strncmp\(request, "GET /api/processes".*?list_processes\(', ws, re.S) is not None
           and "/* ---- API" not in re.search(r'strncmp\(request, "GET /api/processes".*?list_processes\(', ws, re.S).group(0)[1:])
@@ -462,7 +464,7 @@ class MockHandler(BaseHTTPRequestHandler):
             "/api/session": lambda: self._json({
                 "count": 1, "installed": ["PPSA01234"],
             }),
-            "/api/version": lambda: self._json({"version": "V1.1"}),
+            "/api/version": lambda: self._json({"version": "V1.1", "semver": "1.1.1-nefarius.4"}),
             "/api/processes": lambda: self._json({"processes": [
                 {"pid": 1234, "name": "pldmgr_v0.6.3.el"},
                 {"pid": 1300, "name": "SceShellUI"},
@@ -758,6 +760,16 @@ def test_protocol(rest_port: int = MOCK_PORT, pkg_port: int = PKG_MOCK_PORT) -> 
         check("API   POST /api/kill accepts a signed, zero-padded pid", json.loads(b).get("status") == "ok")
     except Exception as exc:
         check("API   process API", False, str(exc))
+
+    # Version keeps the upstream value and adds the fork's SemVer
+    try:
+        s, _, b = http_get("/api/version", rest_port)
+        data = json.loads(b)
+        check("API   /api/version keeps 'version' V1.1 and adds a SemVer 'semver'",
+              data.get("version") == "V1.1"
+              and re.fullmatch(r"\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?", str(data.get("semver", ""))) is not None)
+    except Exception as exc:
+        check("API   /api/version", False, str(exc))
 
     # Stats endpoint includes new fields
     try:

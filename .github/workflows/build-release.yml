@@ -26,7 +26,10 @@ jobs:
       # Pinned SDK and bun versions live in the Dockerfile.
       - name: Build with Docker
         run: |
-          docker buildx build --output type=local,dest=dist .
+          # A tag such as v1.1.1-nefarius.4 reports 1.1.1-nefarius.4 as "semver"; other builds keep the default in types.h.
+          SEMVER=""
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then SEMVER="${GITHUB_REF_NAME#v}"; fi
+          docker buildx build --build-arg VOIDSHELL_SEMVER="${SEMVER}" --output type=local,dest=dist .
           ls -lh dist/
           cat dist/SHA256SUMS
 
