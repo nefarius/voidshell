@@ -110,7 +110,7 @@ export const App = () => {
           <div className="text-neon-purple"><Ghost size={24} /></div>
           <ConnectionBadge online={online} />
         </div>
-        {tab === 'dashboard' && <Dashboard activeGame={stats.running_app ?? stats.active_game} library={library} stats={stats} onLaunch={launch} showToast={showToast} />}
+        {tab === 'dashboard' && <Dashboard activeGame={typeof stats.running_app === 'string' ? stats.running_app : stats.active_game} library={library} stats={stats} onLaunch={launch} showToast={showToast} />}
         {tab === 'pkg'       && <PKGManager showToast={showToast} uploading={uploading} uploadStats={uploadStats} processUpload={processUpload} />}
         {tab === 'payloads'  && <Payloads showToast={showToast} />}
         {tab === 'images'    && <Images showToast={showToast} />}

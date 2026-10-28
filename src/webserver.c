@@ -830,6 +830,8 @@ void handle_client(int sock)
         char  uptime[64];
         char  active_game[0x20];
         char  running_app[0x20];
+        char  running_json[0x30];
+        int   running_rc;
         char  state_str[8];
         int   cpu, soc;
         const char *paused_str, *fan_str;
@@ -845,9 +847,12 @@ void handle_client(int sock)
         memcpy(state_str, &g_s_current_state, 4); state_str[4] = '\0';
         pthread_mutex_unlock(&g_sentinel_mutex);
 
-        /* The running big app, whatever has focus; empty when nothing runs or it is unknown. */
-        if (!get_running_app_title(running_app, sizeof(running_app)))
-            running_app[0] = '\0';
+        /* The running big app, whatever has focus: "" when nothing runs, null when the lookup failed. */
+        running_rc = get_running_app_title(running_app, sizeof(running_app));
+        if (running_rc < 0)
+            snprintf(running_json, sizeof(running_json), "null");
+        else
+            snprintf(running_json, sizeof(running_json), "\"%s\"", running_rc == 1 ? running_app : "");
 
         paused_str = g_paused    ? "true" : "false";
         fan_str    = g_fan_enabled ? "true" : "false";
@@ -855,14 +860,14 @@ void handle_client(int sock)
         snprintf(json, sizeof(json),
                  "{\"total\":%d,\"ps5\":%d,\"ps4\":%d,"
                  "\"cpu\":%d,\"soc\":%d,\"sys_uptime\":\"%s\","
-                 "\"active_game\":\"%s\",\"running_app\":\"%s\",\"state\":\"%s\","
+                 "\"active_game\":\"%s\",\"running_app\":%s,\"state\":\"%s\","
                  "\"paused\":%s,\"ip\":\"%s\","
                  "\"fan_active\":%s,\"fan_target\":%d,"
                  "\"session_count\":%d,"
                  "\"version\":\"%s\"}",
                  g_stat_total, g_stat_ps5, g_stat_ps4,
                  cpu, soc, uptime,
-                 active_game, running_app, state_str,
+                 active_game, running_json, state_str,
                  paused_str, g_ip_address,
                  fan_str, g_fan_target_temp,
                  g_session_count,

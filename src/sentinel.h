@@ -24,8 +24,8 @@ bool smart_wait(int delay_ms);
 
 /*
  * get_running_app_title() -- title ID of the running "big app" (the one game/app the console
- * runs, whatever has focus). Copies it into `out` and returns 1; returns 0 when nothing runs or
- * the lookup fails.
+ * runs, whatever has focus). Returns 1 and copies it into `out` when one runs, 0 when nothing
+ * runs (confirmed), and -1 when the lookup failed (unknown).
  */
 int get_running_app_title(char *out, size_t size);
 

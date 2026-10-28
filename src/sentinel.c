@@ -108,16 +108,17 @@ int get_running_app_title(char *out, size_t size)
     out[0] = '\0';
 
     app_id = sceSystemServiceGetAppIdOfRunningBigApp();
-    if (app_id <= 0) {
-        if (!logged) { log_debug("RUNNING_APP: no big app (id=0x%x)", app_id); logged = 1; }
-        return 0;
+    if (app_id == 0) return 0;                 /* confirmed: no big app runs */
+    if (app_id < 0) {                          /* lookup failed: state unknown */
+        if (!logged) { log_debug("RUNNING_APP: lookup failed (id=0x%x)", app_id); logged = 1; }
+        return -1;
     }
 
     memset(buf, 0, sizeof(buf));
     rc = sceSystemServiceGetAppTitleId(app_id, buf, sizeof(buf) - 1);
     if (rc != 0 || buf[0] == '\0') {
         log_debug("RUNNING_APP: title lookup for app %d failed (rc=0x%x)", app_id, rc);
-        return 0;
+        return -1;
     }
 
     strncpy(out, buf, size - 1);
@@ -146,7 +147,7 @@ void check_running_app_state(void)
     pthread_mutex_unlock(&g_sentinel_mutex);
 
     memset(title_id, 0, sizeof(title_id));
-    if (!get_running_app_title(title_id, sizeof(title_id))) return;
+    if (get_running_app_title(title_id, sizeof(title_id)) != 1) return;
 
     len = strlen(title_id);
     if (len <= 8) return;
@@ -433,7 +434,7 @@ void *thread_sentinel_logic(void *arg)
                 /* Verify the big app is still the same game */
                 char check_tid[0x20] = {0};
                 app_close_counter = 0;
-                if (get_running_app_title(check_tid, sizeof(check_tid))) {
+                if (get_running_app_title(check_tid, sizeof(check_tid)) == 1) {
                     if (strncmp(check_tid, cur_id, 9) != 0) {
                         log_debug("SENTINEL: App Close Detected (%s). Resetting ID.", cur_id);
                         pthread_mutex_lock(&g_sentinel_mutex);
