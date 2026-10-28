@@ -234,6 +234,8 @@ Base URL: `http://<ps5-ip>:7007`
 | GET | `/api/payloads` | Files in `/data/voidshell/payloads/` |
 | GET | `/api/session` | Titles installed this boot |
 | GET | `/api/version` | `{"version":"V1.1"}` |
+| GET | `/api/processes` | `{"processes":[{"pid":123,"name":"..."}]}`; names are the kernel's 19-character process names |
+| POST | `/api/kill` | Body is a decimal pid; sends SIGKILL. Answers `{"status":"ok"}` or `{"status":"error","error":"refused"\|"no such process"\|"failed"}`. Pids 0 and 1, VoidShell itself and SceShellUI are refused |
 | GET | `/api/config_raw` | Raw `config.ini` |
 | GET | `/api/logs` | Last ~64 KB of debug log |
 | GET | `/api/images` | Currently mounted images |

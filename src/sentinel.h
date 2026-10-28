@@ -34,6 +34,16 @@ void check_running_app_state(void);
 
 /* System-level helpers */
 void respring_shell(void);
+
+/*
+ * list_processes() -- walk kern.proc.all. The callback gets the pid and the name (at most 19
+ * characters) and returns non-zero to stop. Returns the number of entries visited, or -1 on failure.
+ */
+typedef int (*process_cb)(int pid, const char *name, void *ctx);
+int list_processes(process_cb cb, void *ctx);
+
+/* kill_process() -- SIGKILL one process. Refuses pid <= 1, VoidShell and SceShellUI. 0 or an errno value. */
+int kill_process(int pid);
 void trigger_repair(void);
 void *thread_repair_worker(void *arg);
 

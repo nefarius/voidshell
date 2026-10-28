@@ -315,6 +315,8 @@ def test_static_image_mount() -> None:
     check("IMG  webserver.c includes image_mount.h",                '#include "image_mount.h"' in ws)
     check("IMG  webserver.c has GET /api/images route",             "/api/images" in ws and "image_mount_list_json" in ws)
     check("IMG  webserver.c has POST /api/images/unmount route",    "/api/images/unmount" in ws and "image_mount_unmount_by_path" in ws)
+    check("API  webserver.c has /api/processes and /api/kill routes",
+          "GET /api/processes" in ws and "POST /api/kill" in ws and "kill_process" in ws)
 
     # --- Makefile ---
     mk = slurp(ROOT / "Makefile")
@@ -456,6 +458,10 @@ class MockHandler(BaseHTTPRequestHandler):
                 "count": 1, "installed": ["PPSA01234"],
             }),
             "/api/version": lambda: self._json({"version": "V1.1"}),
+            "/api/processes": lambda: self._json({"processes": [
+                {"pid": 1234, "name": "pldmgr_v0.6.3.el"},
+                {"pid": 1300, "name": "SceShellUI"},
+            ]}),
             "/api/config_raw": lambda: self._send(200, "text/plain", (
                 "[Settings]\n"
                 "ScanInterval=5\n"
@@ -502,6 +508,16 @@ class MockHandler(BaseHTTPRequestHandler):
         if path == "/api/notify":
             msg = body.decode("utf-8", errors="replace").strip()
             self._json({"status": "ok", "message": msg})
+            return
+
+        if path == "/api/kill":
+            pid = body.decode("utf-8", errors="replace").strip()
+            if pid == "1234":
+                self._json({"status": "ok"})
+            elif pid in ("0", "1", "1300"):
+                self._json({"status": "error", "error": "refused"})
+            else:
+                self._json({"status": "error", "error": "no such process"})
             return
 
         if path == "/api/images/unmount":
@@ -705,6 +721,19 @@ def test_protocol(rest_port: int = MOCK_PORT, pkg_port: int = PKG_MOCK_PORT) -> 
               data.get("status") == "error")
     except Exception as exc:
         check("IMG  POST /api/images/unmount (unknown path)", False, str(exc))
+
+    # Process API
+    try:
+        s, _, b = http_get("/api/processes", rest_port)
+        data = json.loads(b)
+        check("API   GET /api/processes lists pid + name",
+              s == 200 and all("pid" in p and "name" in p for p in data["processes"]))
+        s, _, b = http_post("/api/kill", b"1", rest_port)
+        check("API   POST /api/kill refuses pid 1", json.loads(b).get("status") == "error")
+        s, _, b = http_post("/api/kill", b"1234", rest_port)
+        check("API   POST /api/kill accepts a listed pid", json.loads(b).get("status") == "ok")
+    except Exception as exc:
+        check("API   process API", False, str(exc))
 
     # Stats endpoint includes new fields
     try:

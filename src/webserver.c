@@ -14,6 +14,8 @@
  *   GET  /api/logs/clear   -> truncate debug.log
  *   POST /api/logs/clear   -> truncate debug.log
  *   POST /api/send_payload -> send ELF payload to 127.0.0.1:15651
+ *   GET  /api/processes    -> JSON: running processes (pid, name)
+ *   POST /api/kill         -> SIGKILL the process whose pid is the body
  *   POST /api/launch       -> set g_cmd_launch_id
  *   POST /api/rescan       -> set g_cmd_rescan
  *   POST /api/pause        -> toggle g_paused
@@ -62,6 +64,7 @@
 #include <stdarg.h>
 #include <ctype.h>
 #include <stdbool.h>
+#include <errno.h>
 
 /* ============================================================
  * Global PKG server state
@@ -187,6 +190,35 @@ void send_response(int sock, const char *content_type, const char *body,
 
     send(sock, header, strlen(header), 0);
     send(sock, body,   body_len,       0);
+}
+
+/* Builds the /api/processes array; names are reduced to printable ASCII with " and \ escaped. */
+struct proc_json {
+    char *buf;
+    int   pos;
+    int   cap;
+    int   count;
+};
+
+static int proc_json_cb(int pid, const char *name, void *ctx)
+{
+    struct proc_json *pj = ctx;
+    char esc[48];
+    int  n = 0;
+
+    for (; *name && n < (int)sizeof(esc) - 2; name++) {
+        unsigned char c = (unsigned char)*name;
+        if (c < 0x20 || c > 0x7e) continue;
+        if (c == '"' || c == '\\') esc[n++] = '\\';
+        esc[n++] = (char)c;
+    }
+    esc[n] = '\0';
+
+    if (pj->cap - pj->pos < 128) return 1; /* keep room for the closing brackets */
+    pj->pos += snprintf(pj->buf + pj->pos, pj->cap - pj->pos,
+                        "%s{\"pid\":%d,\"name\":\"%s\"}", pj->count ? "," : "", pid, esc);
+    pj->count++;
+    return 0;
 }
 
 /* ============================================================
@@ -1117,6 +1149,40 @@ void handle_client(int sock)
             }
         }
         send_response(sock, "application/json", "{\"status\":\"ok\"}", 15, 1);
+        goto done;
+    }
+
+    /* ---- API: processes ---- */
+    if (strncmp(request, "GET /api/processes", 18) == 0) {
+        struct proc_json pj = { malloc(0x10000), 0, 0x10000, 0 };
+
+        if (!pj.buf) goto done;
+        pj.pos = snprintf(pj.buf, pj.cap, "{\"processes\":[");
+        if (list_processes(proc_json_cb, &pj) < 0) {
+            pj.pos = snprintf(pj.buf, pj.cap, "{\"processes\":[");
+        }
+        pj.pos += snprintf(pj.buf + pj.pos, pj.cap - pj.pos, "]}");
+        send_response(sock, "application/json", pj.buf, pj.pos, 1);
+        free(pj.buf);
+        goto done;
+    }
+
+    /* ---- API: kill ---- */
+    if (strncmp(request, "POST /api/kill", 14) == 0) {
+        char *body = strstr(request, "\r\n\r\n");
+        char  json[96];
+        int   rc;
+
+        if (!body) goto done;
+        body += 4;
+        rc = kill_process(atoi(body));
+        if (rc == 0) {
+            snprintf(json, sizeof(json), "{\"status\":\"ok\"}");
+        } else {
+            snprintf(json, sizeof(json), "{\"status\":\"error\",\"error\":\"%s\"}",
+                     rc == ESRCH ? "no such process" : rc == EPERM ? "refused" : "failed");
+        }
+        send_response(sock, "application/json", json, strlen(json), 1);
         goto done;
     }
 
