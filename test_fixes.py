@@ -315,8 +315,13 @@ def test_static_image_mount() -> None:
     check("IMG  webserver.c includes image_mount.h",                '#include "image_mount.h"' in ws)
     check("IMG  webserver.c has GET /api/images route",             "/api/images" in ws and "image_mount_list_json" in ws)
     check("IMG  webserver.c has POST /api/images/unmount route",    "/api/images/unmount" in ws and "image_mount_unmount_by_path" in ws)
-    check("API  webserver.c has /api/processes and /api/kill routes",
-          "GET /api/processes" in ws and "POST /api/kill" in ws and "kill_process" in ws)
+    # Each route block (up to the next "/* ---- API" marker) has to call its helper, not merely mention it.
+    check("API  webserver.c GET /api/processes route calls list_processes()",
+          re.search(r'strncmp\(request, "GET /api/processes".*?list_processes\(', ws, re.S) is not None
+          and "/* ---- API" not in re.search(r'strncmp\(request, "GET /api/processes".*?list_processes\(', ws, re.S).group(0)[1:])
+    check("API  webserver.c POST /api/kill route calls kill_process()",
+          re.search(r'strncmp\(request, "POST /api/kill".*?kill_process\(', ws, re.S) is not None
+          and "/* ---- API" not in re.search(r'strncmp\(request, "POST /api/kill".*?kill_process\(', ws, re.S).group(0)[1:])
 
     # --- Makefile ---
     mk = slurp(ROOT / "Makefile")
@@ -511,12 +516,14 @@ class MockHandler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/kill":
-            pid = body.decode("utf-8", errors="replace").strip()
-            if pid == "1234":
-                self._json({"status": "ok"})
-            elif pid in ("0", "1"):
+            # Mirrors the C handler: strict decimal (optional sign, padding allowed), then 1 < pid <= INT_MAX.
+            text = body.decode("ascii", errors="replace").strip()
+            pid = int(text) if re.fullmatch(r"[+-]?[0-9]+", text) else None
+            if pid is None or pid <= 1 or pid > 2**31 - 1:
                 self._json({"status": "error", "error": "bad request"})
-            elif pid == "1300":
+            elif pid == 1234:
+                self._json({"status": "ok"})
+            elif pid == 1300:
                 self._json({"status": "error", "error": "refused"})
             else:
                 self._json({"status": "error", "error": "no such process"})
@@ -731,9 +738,16 @@ def test_protocol(rest_port: int = MOCK_PORT, pkg_port: int = PKG_MOCK_PORT) -> 
         check("API   GET /api/processes lists pid + name",
               s == 200 and all("pid" in p and "name" in p for p in data["processes"]))
         s, _, b = http_post("/api/kill", b"1", rest_port)
-        check("API   POST /api/kill refuses pid 1", json.loads(b).get("status") == "error")
+        for bad in (b"1", b"0", b"-5", b"12abc", b"", b"2147483648"):
+            s, _, b = http_post("/api/kill", bad, rest_port)
+            check(f"API   POST /api/kill rejects {bad!r} as bad request",
+                  json.loads(b) == {"status": "error", "error": "bad request"})
+        s, _, b = http_post("/api/kill", b"1300", rest_port)
+        check("API   POST /api/kill refuses SceShellUI", json.loads(b).get("error") == "refused")
         s, _, b = http_post("/api/kill", b"1234", rest_port)
         check("API   POST /api/kill accepts a listed pid", json.loads(b).get("status") == "ok")
+        s, _, b = http_post("/api/kill", b"+01234", rest_port)
+        check("API   POST /api/kill accepts a signed, zero-padded pid", json.loads(b).get("status") == "ok")
     except Exception as exc:
         check("API   process API", False, str(exc))
 
