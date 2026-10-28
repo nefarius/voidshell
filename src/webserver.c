@@ -6,7 +6,7 @@
  *   GET  /index.html     -> serve_dashboard
  *   GET  /assets/icon/:id  -> serve icon0.png from /user/appmeta/<id>/
  *   GET  /assets/pic/:id   -> serve pic0.png  from /user/appmeta/<id>/
- *   GET  /api/stats        -> JSON: cpu/soc temps, uptime, active game, running app, counts
+ *   GET  /api/stats        -> JSON: cpu/soc temps, uptime, active game, running app, counts, firmware
  *   GET  /api/library      -> JSON: full installed app library
  *   GET  /api/payloads     -> JSON: .elf/.bin files in /data/voidshell/payloads/
  *   GET  /api/config_raw   -> raw text: /data/voidshell/config.ini
@@ -833,6 +833,8 @@ void handle_client(int sock)
         char  running_json[0x30];
         int   running_rc;
         char  state_str[8];
+        char  firmware[8];
+        uint32_t fw;
         int   cpu, soc;
         const char *paused_str, *fan_str;
 
@@ -854,6 +856,11 @@ void handle_client(int sock)
         else
             snprintf(running_json, sizeof(running_json), "\"%s\"", running_rc == 1 ? running_app : "");
 
+        /* System software version, BCD-packed: 0x13400000 -> "13.40". */
+        fw = kernel_get_fw_version();
+        snprintf(firmware, sizeof(firmware), "%02x.%02x",
+                 (unsigned)((fw >> 24) & 0xFF), (unsigned)((fw >> 16) & 0xFF));
+
         paused_str = g_paused    ? "true" : "false";
         fan_str    = g_fan_enabled ? "true" : "false";
 
@@ -864,14 +871,14 @@ void handle_client(int sock)
                  "\"paused\":%s,\"ip\":\"%s\","
                  "\"fan_active\":%s,\"fan_target\":%d,"
                  "\"session_count\":%d,"
-                 "\"version\":\"%s\"}",
+                 "\"version\":\"%s\",\"firmware\":\"%s\"}",
                  g_stat_total, g_stat_ps5, g_stat_ps4,
                  cpu, soc, uptime,
                  active_game, running_json, state_str,
                  paused_str, g_ip_address,
                  fan_str, g_fan_target_temp,
                  g_session_count,
-                 VOIDSHELL_VERSION);
+                 VOIDSHELL_VERSION, firmware);
         send_response(sock, "application/json", json, strlen(json), 1);
         goto done;
     }

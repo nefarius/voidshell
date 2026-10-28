@@ -51,9 +51,10 @@ jobs:
           body: |
             Fork build of [amilarajans/voidshell](https://github.com/amilarajans/voidshell) v1.1.1.
 
-            The only change is a fix for the payload not loading on firmware that does not export
-            `sceAppInstUtilAppInstallTitleDir` (observed on 13.40): the symbol is now resolved at runtime.
-            See upstream PR [#2](https://github.com/amilarajans/voidshell/pull/2). Built reproducibly with
+            Changes: a fix for the payload not loading on firmware that does not export
+            `sceAppInstUtilAppInstallTitleDir` (observed on 13.40): the symbol is now resolved at runtime
+            (upstream PR [#2](https://github.com/amilarajans/voidshell/pull/2)), a `running_app` field, and a
+            `firmware` field (e.g. `"13.40"`) in `GET /api/stats`. Built reproducibly with
             the Dockerfile (ps5-payload-sdk v0.45). No support promise; prefer upstream once it ships the fix.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
