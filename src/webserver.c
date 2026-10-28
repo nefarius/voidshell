@@ -227,8 +227,48 @@ static int proc_json_cb(int pid, const char *name, void *ctx)
  * declared Content-Length (required, at most 64) is present. Returns the body start and sets *body_len,
  * or NULL when the length is missing, too large, or the connection ends first.
  */
+#define SMALL_BODY_DEADLINE_MS 5000
+
+/* Milliseconds left until `deadline` (CLOCK_MONOTONIC, in ms); 0 when it has passed. */
+static long ms_until(long long deadline)
+{
+    struct timespec now;
+    long long       left;
+
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    left = deadline - ((long long)now.tv_sec * 1000 + now.tv_nsec / 1000000);
+    return left > 0 ? (long)left : 0;
+}
+
+/*
+ * Strict Content-Length value: optional blanks, decimal digits only, optional blanks, then the end of the
+ * header line. Returns -1 for anything else (so "5abc" or "-1" is not read as 5 or accepted).
+ */
+static long parse_content_length(const char *value, const char *line_end)
+{
+    long len = 0;
+    int  digits = 0;
+
+    while (value < line_end && (*value == ' ' || *value == '\t')) value++;
+    while (value < line_end && *value >= '0' && *value <= '9') {
+        len = len * 10 + (*value - '0');
+        if (len > 1000000) return -1;
+        value++;
+        digits++;
+    }
+    while (value < line_end && (*value == ' ' || *value == '\t')) value++;
+    return (digits > 0 && value == line_end) ? len : -1;
+}
+
 static const char *read_small_body(int sock, char *request, unsigned int *received, size_t cap, long *body_len)
 {
+    struct timespec start;
+    long long       deadline;
+
+    /* One fixed deadline for the whole request: a client that trickles bytes does not get more time. */
+    clock_gettime(CLOCK_MONOTONIC, &start);
+    deadline = (long long)start.tv_sec * 1000 + start.tv_nsec / 1000000 + SMALL_BODY_DEADLINE_MS;
+
     for (;;) {
         char *sep = strstr(request, "\r\n\r\n");
         if (sep) {
@@ -237,7 +277,8 @@ static const char *read_small_body(int sock, char *request, unsigned int *receiv
 
             for (p = request; p < sep; p++) {
                 if ((p == request || p[-1] == '\n') && strncasecmp(p, "Content-Length:", 15) == 0) {
-                    len = strtol(p + 15, NULL, 10);
+                    char *eol = strstr(p, "\r\n");
+                    len = parse_content_length(p + 15, eol ? eol : sep);
                     break;
                 }
             }
@@ -250,7 +291,19 @@ static const char *read_small_body(int sock, char *request, unsigned int *receiv
 
         if (*received >= cap - 1) return NULL;
         {
-            int n = recv(sock, request + *received, cap - 1 - *received, 0);
+            long           left = ms_until(deadline);
+            fd_set         rfds;
+            struct timeval tv;
+            int            n;
+
+            if (left <= 0) return NULL;
+            FD_ZERO(&rfds);
+            FD_SET(sock, &rfds);
+            tv.tv_sec  = left / 1000;
+            tv.tv_usec = (left % 1000) * 1000;
+            if (select(sock + 1, &rfds, NULL, NULL, &tv) <= 0) return NULL;
+
+            n = recv(sock, request + *received, cap - 1 - *received, 0);
             if (n < 1) return NULL;
             *received += (unsigned int)n;
             request[*received] = '\0';
@@ -1240,13 +1293,14 @@ void handle_client(int sock)
         char        json[96];
         int         rc = EINVAL;
 
+        /* Finish reading the (bounded) headers and body first: the marker may arrive in a later segment. */
+        body = read_small_body(sock, request, &bytes_recv, 0x40000, &body_len);
         if (!has_request_marker(request)) {
             const char *denied = "{\"status\":\"error\",\"error\":\"forbidden\"}";
             send_response(sock, "application/json", denied, strlen(denied), 1);
             goto done;
         }
 
-        body = read_small_body(sock, request, &bytes_recv, 0x40000, &body_len);
         if (body && body_len > 0 && body_len < (long)sizeof(pid_text)) {
             memcpy(pid_text, body, (size_t)body_len);
             pid_text[body_len] = '\0';
