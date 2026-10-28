@@ -514,7 +514,9 @@ class MockHandler(BaseHTTPRequestHandler):
             pid = body.decode("utf-8", errors="replace").strip()
             if pid == "1234":
                 self._json({"status": "ok"})
-            elif pid in ("0", "1", "1300"):
+            elif pid in ("0", "1"):
+                self._json({"status": "error", "error": "bad request"})
+            elif pid == "1300":
                 self._json({"status": "error", "error": "refused"})
             else:
                 self._json({"status": "error", "error": "no such process"})
