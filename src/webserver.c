@@ -65,6 +65,7 @@
 #include <ctype.h>
 #include <stdbool.h>
 #include <errno.h>
+#include <limits.h>
 
 /* ============================================================
  * Global PKG server state
@@ -219,6 +220,42 @@ static int proc_json_cb(int pid, const char *name, void *ctx)
                         "%s{\"pid\":%d,\"name\":\"%s\"}", pj->count ? "," : "", pid, esc);
     pj->count++;
     return 0;
+}
+
+/*
+ * Completes a small POST in `request` (capacity `cap`, `*received` bytes so far): keeps reading until the
+ * declared Content-Length (required, at most 64) is present. Returns the body start and sets *body_len,
+ * or NULL when the length is missing, too large, or the connection ends first.
+ */
+static const char *read_small_body(int sock, char *request, unsigned int *received, size_t cap, long *body_len)
+{
+    for (;;) {
+        char *sep = strstr(request, "\r\n\r\n");
+        if (sep) {
+            long  len = -1;
+            char *p;
+
+            for (p = request; p < sep; p++) {
+                if ((p == request || p[-1] == '\n') && strncasecmp(p, "Content-Length:", 15) == 0) {
+                    len = strtol(p + 15, NULL, 10);
+                    break;
+                }
+            }
+            if (len < 0 || len > 64) return NULL;
+            if (*received >= (unsigned int)((sep + 4 - request) + len)) {
+                *body_len = len;
+                return sep + 4;
+            }
+        }
+
+        if (*received >= cap - 1) return NULL;
+        {
+            int n = recv(sock, request + *received, cap - 1 - *received, 0);
+            if (n < 1) return NULL;
+            *received += (unsigned int)n;
+            request[*received] = '\0';
+        }
+    }
 }
 
 /* ============================================================
@@ -1159,7 +1196,10 @@ void handle_client(int sock)
         if (!pj.buf) goto done;
         pj.pos = snprintf(pj.buf, pj.cap, "{\"processes\":[");
         if (list_processes(proc_json_cb, &pj) < 0) {
-            pj.pos = snprintf(pj.buf, pj.cap, "{\"processes\":[");
+            const char *err = "{\"status\":\"error\",\"error\":\"process list unavailable\"}";
+            send_response(sock, "application/json", err, strlen(err), 1);
+            free(pj.buf);
+            goto done;
         }
         pj.pos += snprintf(pj.buf + pj.pos, pj.cap - pj.pos, "]}");
         send_response(sock, "application/json", pj.buf, pj.pos, 1);
@@ -1169,15 +1209,33 @@ void handle_client(int sock)
 
     /* ---- API: kill ---- */
     if (strncmp(request, "POST /api/kill", 14) == 0) {
-        char *body = strstr(request, "\r\n\r\n");
-        char  json[96];
-        int   rc;
+        const char *body;
+        long        body_len = 0;
+        char        pid_text[16];
+        char       *end = NULL;
+        long        pid = 0;
+        char        json[96];
+        int         rc = EINVAL;
 
-        if (!body) goto done;
-        body += 4;
-        rc = kill_process(atoi(body));
+        body = read_small_body(sock, request, &bytes_recv, 0x40000, &body_len);
+        if (body && body_len > 0 && body_len < (long)sizeof(pid_text)) {
+            memcpy(pid_text, body, (size_t)body_len);
+            pid_text[body_len] = '\0';
+            errno = 0;
+            pid = strtol(pid_text, &end, 10);
+            while (end && *end && isspace((unsigned char)*end)) end++;
+            if (errno != 0 || end == pid_text || *end != '\0' || pid <= 1 || pid > INT_MAX) {
+                body = NULL;
+            }
+        } else {
+            body = NULL;
+        }
+
+        if (body) rc = kill_process((int)pid);
         if (rc == 0) {
             snprintf(json, sizeof(json), "{\"status\":\"ok\"}");
+        } else if (rc == EINVAL) {
+            snprintf(json, sizeof(json), "{\"status\":\"error\",\"error\":\"bad request\"}");
         } else {
             snprintf(json, sizeof(json), "{\"status\":\"error\",\"error\":\"%s\"}",
                      rc == ESRCH ? "no such process" : rc == EPERM ? "refused" : "failed");
